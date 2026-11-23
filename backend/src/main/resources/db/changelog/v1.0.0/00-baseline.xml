@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-00-system-init" author="savdocrm-core">
+        <comment>Initialize SAVDOCRM system initialization tracking</comment>
+        <createTable tableName="system_metadata">
+            <column name="id" type="VARCHAR(50)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="system_version" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="initialized_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <insert tableName="system_metadata">
+            <column name="id" value="SAVDOCRM_CORE"/>
+            <column name="system_version" value="0.0.1-SNAPSHOT"/>
+            <column name="status" value="INITIALIZED"/>
+        </insert>
+
+        <rollback>
+            <dropTable tableName="system_metadata"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
