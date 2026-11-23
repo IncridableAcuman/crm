@@ -2,12 +2,20 @@
 
 Base Path: `/api/v1/auth`
 
+---
+
+## 1. Authentication & Cookie Delivery Model
+
+SAVDOCRM uses an **In-Memory Access Token + HttpOnly Cookie** architecture:
+- **Access Token**: Emitted in the JSON response body (`accessToken`). Stored exclusively in-memory by the frontend client; never persisted to `localStorage` or `sessionStorage`.
+- **Refresh Token**: Transmitted via an **HttpOnly, Secure (in production), SameSite=Lax** cookie named `savdocrm_refresh_token` scoped to `Path=/api/v1/auth`. The raw refresh token is omitted from JSON response bodies.
+
 All API responses follow the standard SAVDOCRM wrapper format:
 ```json
 {
   "success": true,
   "data": { ... },
-  "message": "Optional human-readable confirmation message",
+  "message": "Optional confirmation message",
   "timestamp": "2026-11-23T16:30:00Z"
 }
 ```
@@ -15,10 +23,10 @@ All API responses follow the standard SAVDOCRM wrapper format:
 Errors follow the RFC 7807 `application/problem+json` standard:
 ```json
 {
-  "type": "https://savdocrm.com/errors/bad-request",
-  "title": "Bad Request",
-  "status": 400,
-  "detail": "Detailed failure explanation",
+  "type": "https://savdocrm.com/errors/unauthorized",
+  "title": "Authentication Failed",
+  "status": 401,
+  "detail": "Invalid credentials",
   "instance": "/api/v1/auth/login",
   "timestamp": "2026-11-23T16:30:00Z"
 }
@@ -26,16 +34,18 @@ Errors follow the RFC 7807 `application/problem+json` standard:
 
 ---
 
-## 1. Register User / Store
+## 2. Endpoints
 
+### 2.1 Register User / Store
 Creates a new user account with optional initial store setup.
 
 - **Method**: `POST`
 - **Path**: `/api/v1/auth/register`
 - **Authentication**: None (Public)
-- **Content-Type**: `application/json`
+- **Headers Returned**:
+  - `Set-Cookie: savdocrm_refresh_token=<rawToken>; Path=/api/v1/auth; Max-Age=2592000; HttpOnly; SameSite=Lax`
 
-### Request Body
+#### Request Body
 ```json
 {
   "email": "retailer@example.com",
@@ -48,22 +58,12 @@ Creates a new user account with optional initial store setup.
 }
 ```
 
-### Validation Rules
-- `email`: Required, valid email format, max 150 chars. Unique case-insensitively.
-- `username`: Required, 3–50 chars, alphanumeric + `_`, `.`, `-`. Unique.
-- `password`: Required, minimum 8 characters.
-- `firstName`: Required, max 100 chars.
-- `lastName`: Required, max 100 chars.
-- `phoneNumber`: Optional, max 30 chars.
-- `storeName`: Optional, max 150 chars. If provided, creates a Tenant store, Main Branch, and assigns ACTIVE membership.
-
-### Response `201 Created`
+#### Response `201 Created`
 ```json
 {
   "success": true,
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "xH4n9Y7_...",
     "tokenType": "Bearer",
     "expiresIn": 900,
     "user": {
@@ -96,22 +96,18 @@ Creates a new user account with optional initial store setup.
 }
 ```
 
-### Error Responses
-- `400 Bad Request`: Duplicate email or duplicate username (`"An account with email '...' already exists."`).
-- `400 Bad Request`: Validation failure on required fields.
-
 ---
 
-## 2. Login
-
-Authenticates user credentials and returns a Global Access Token along with the list of available store memberships.
+### 2.2 Login
+Authenticates credentials and returns a Global Access Token in JSON and an HttpOnly refresh cookie.
 
 - **Method**: `POST`
 - **Path**: `/api/v1/auth/login`
 - **Authentication**: None (Public)
-- **Content-Type**: `application/json`
+- **Headers Returned**:
+  - `Set-Cookie: savdocrm_refresh_token=<rawToken>; Path=/api/v1/auth; Max-Age=2592000; HttpOnly; SameSite=Lax`
 
-### Request Body
+#### Request Body
 ```json
 {
   "emailOrUsername": "retailer@example.com",
@@ -119,13 +115,12 @@ Authenticates user credentials and returns a Global Access Token along with the 
 }
 ```
 
-### Response `200 OK`
+#### Response `200 OK`
 ```json
 {
   "success": true,
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "kQ3p8Z1_...",
     "tokenType": "Bearer",
     "expiresIn": 900,
     "user": {
@@ -152,45 +147,33 @@ Authenticates user credentials and returns a Global Access Token along with the 
 }
 ```
 
-### Error Responses
-- `401 Unauthorized`: Invalid email/username or password (`"Invalid credentials"`).
-- `403 Forbidden`: Account is disabled or suspended.
-
 ---
 
-## 3. Select Tenant Store
-
-Activates a store context and issues a Tenant-Scoped Access Token.
+### 2.3 Select Tenant Store
+Activates a store context and issues a Tenant-Scoped Access Token and updated refresh cookie.
 
 - **Method**: `POST`
 - **Path**: `/api/v1/auth/select-tenant`
 - **Authentication**: Required (`Authorization: Bearer <global_or_tenant_token>`)
-- **Content-Type**: `application/json`
+- **Headers Returned**:
+  - `Set-Cookie: savdocrm_refresh_token=<newRawToken>; Path=/api/v1/auth; Max-Age=2592000; HttpOnly; SameSite=Lax`
 
-### Request Body
+#### Request Body
 ```json
 {
   "tenantId": "c92fb380-087e-4071-8bc6-90518389366d"
 }
 ```
 
-### Response `200 OK`
+#### Response `200 OK`
 ```json
 {
   "success": true,
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "wE5t2M8_...",
     "tokenType": "Bearer",
     "expiresIn": 900,
-    "user": {
-      "id": "e4a5d892-7489-4bc2-92a0-4131557d19c3",
-      "email": "retailer@example.com",
-      "username": "retailer_bob",
-      "firstName": "Bob",
-      "lastName": "Smith",
-      "phoneNumber": "+1234567890"
-    },
+    "user": { ... },
     "activeTenant": {
       "tenantId": "c92fb380-087e-4071-8bc6-90518389366d",
       "tenantName": "Bob Grocery Store",
@@ -205,35 +188,28 @@ Activates a store context and issues a Tenant-Scoped Access Token.
 }
 ```
 
-### Error Responses
-- `401 Unauthorized`: Missing or invalid Bearer token.
-- `403 Forbidden`: User does not have an active membership in the requested store, or store is suspended.
-
 ---
 
-## 4. Refresh Token Rotation
-
-Rotates the refresh token and generates a new access token within the active session family.
+### 2.4 Refresh Token Rotation
+Rotates the session refresh token and emits a new in-memory access token. The request reads the refresh token from the `savdocrm_refresh_token` cookie (or optional fallback body).
 
 - **Method**: `POST`
 - **Path**: `/api/v1/auth/refresh`
-- **Authentication**: None (Public)
-- **Content-Type**: `application/json`
+- **Authentication**: None (Reads HttpOnly Cookie)
+- **Headers Returned**:
+  - `Set-Cookie: savdocrm_refresh_token=<rotatedToken>; Path=/api/v1/auth; Max-Age=2592000; HttpOnly; SameSite=Lax`
 
-### Request Body
+#### Request Body (Optional / Empty)
 ```json
-{
-  "refreshToken": "wE5t2M8_..."
-}
+{}
 ```
 
-### Response `200 OK`
+#### Response `200 OK`
 ```json
 {
   "success": true,
   "data": {
     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refreshToken": "vN9s1K4_...",
     "tokenType": "Bearer",
     "expiresIn": 900,
     "user": { ... },
@@ -245,29 +221,22 @@ Rotates the refresh token and generates a new access token within the active ses
 }
 ```
 
-### Error Responses
-- `401 Unauthorized`: Token is expired, invalid, or already revoked.
+#### Error Responses
+- `401 Unauthorized`: Token expired or invalid.
 - `401 Unauthorized`: Token reuse detected — entire session family revoked.
 
 ---
 
-## 5. Logout
-
-Revokes the refresh token and ends the active session.
+### 2.5 Logout
+Revokes the refresh token session in the database and instructs the browser to clear the cookie.
 
 - **Method**: `POST`
 - **Path**: `/api/v1/auth/logout`
-- **Authentication**: None (Public; accepts optional refresh token in payload)
-- **Content-Type**: `application/json`
+- **Authentication**: None (Public; extracts cookie automatically)
+- **Headers Returned**:
+  - `Set-Cookie: savdocrm_refresh_token=; Path=/api/v1/auth; Max-Age=0; HttpOnly; SameSite=Lax`
 
-### Request Body
-```json
-{
-  "refreshToken": "vN9s1K4_..."
-}
-```
-
-### Response `200 OK`
+#### Response `200 OK`
 ```json
 {
   "success": true,
@@ -279,15 +248,14 @@ Revokes the refresh token and ends the active session.
 
 ---
 
-## 6. Get Current User Profile
-
-Retrieves current authenticated identity and available store memberships.
+### 2.6 Get Current User Profile
+Retrieves current identity profile and available store memberships.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/auth/me`
 - **Authentication**: Required (`Authorization: Bearer <token>`)
 
-### Response `200 OK`
+#### Response `200 OK`
 ```json
 {
   "success": true,

@@ -61,12 +61,20 @@ sequenceDiagram
     User->>Filter: GET /api/v1/products (Header: Bearer <token>)
     activate Filter
     Filter->>Filter: Verify JWT signature & expiration
-    Filter->>Ctx: setTenantId(claims.tenantId), setUserId(claims.sub)
-    Filter->>DB: Executes query WHERE tenant_id = TenantContextHolder.getTenantId()
+    Filter->>DB: Live check: User ACTIVE, Tenant ACTIVE, Membership ACTIVE
+    Filter->>Filter: Validate membership ownership & claim consistency
+    Filter->>Ctx: TenantContextHolder.setContext(TenantContext.of(tenantId))
+    Filter->>DB: Executes query strictly filtered by active tenant
     DB-->>Filter: Filtered data matching only authenticated tenant
     Filter-->>User: 200 OK (Isolated Tenant Data)
-    Filter->>Ctx: clear() (in finally block to prevent thread pool leakage)
+    Filter->>Ctx: clear() (Guaranteed in finally block to prevent ThreadLocal leakage)
     deactivate Filter
+
+    Note over User,Filter: Tenant Switching & Cache Isolation
+    User->>Auth: POST /api/v1/auth/select-tenant {tenantId: newTenantId}
+    Auth->>DB: Verify membership & tenant ACTIVE
+    Auth-->>User: Returns new Tenant Access Token + Rotated HttpOnly Cookie
+    User->>User: queryClient.clear() (Purges all cached data from previous tenant)
 ```
 
 ---

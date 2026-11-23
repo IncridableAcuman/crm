@@ -39,20 +39,26 @@ This document tracks the implementation status of all business and technical mod
   - Database-level isolation: Liquibase changesets `v1.0.0/01-create-tenants.xml` and `v1.0.0/02-create-branches.xml` with foreign key `fk_branches_tenant` on delete cascade, composite unique constraints `uq_branches_tenant_code` and `uq_branches_tenant_id`, and index `idx_branches_tenant`.
   - Automated tests: 17 total tests executed across unit and Testcontainers PostgreSQL 16 integration suites verifying fail-closed behavior, cross-tenant read/write isolation, and composite constraints.
 
-### Milestone 03 — Authentication & Session Management (Status: COMPLETED)
+### Milestone 03 — Authentication & Session Management (Status: COMPLETED & AUDITED)
 - **Implemented Behavior**:
   - `User` global account entity (`users` table, unique case-insensitive email, unique username, BCrypt password hashing, optimistic locking).
   - `TenantMembership` entity (`tenant_memberships` table, unique composite `uq_memberships_tenant_user` and `uq_memberships_tenant_id`, statuses: `ACTIVE`, `INVITED`, `SUSPENDED`).
   - `RefreshToken` entity (`refresh_tokens` table, SHA-256 token hash storage, `token_family` tracking for compromise quarantine, revocation metadata, rotation lifecycle).
+  - Token delivery architecture:
+    - Access token: strictly in-memory (Zustand state); zero storage in `localStorage` or `sessionStorage`.
+    - Refresh token: delivered via `HttpOnly`, `Secure` (prod), `SameSite=Lax` cookie (`savdocrm_refresh_token`) scoped to `/api/v1/auth`. Omitted from JSON response body.
+  - Concurrency & Row-Level Locking: `RefreshTokenRepository.findByTokenHashWithLock` uses `PESSIMISTIC_WRITE` row locks (`SELECT ... FOR UPDATE`), serializing concurrent refresh requests and preventing inconsistent sessions.
+  - Concurrency grace window: 10-second rotation grace window allows race-free concurrent tab refresh without false reuse triggering; replaying outside the window immediately triggers automated compromise quarantine revoking the entire token family.
   - Dual-phase authentication flow:
-    1. Global login (`POST /api/v1/auth/login`) -> verifies credentials, returns global access token + refresh token + available tenants list.
-    2. Tenant selection (`POST /api/v1/auth/select-tenant`) -> validates active membership and active store status, returns tenant-scoped access token + refresh token.
-  - Registration (`POST /api/v1/auth/register`) with optional initial store and branch creation via `TenantExecutionTemplate`.
-  - Refresh token rotation (`POST /api/v1/auth/refresh`) with automated token reuse detection revoking the entire token family.
-  - Logout (`POST /api/v1/auth/logout`) with instant refresh token revocation.
+    1. Global login (`POST /api/v1/auth/login`) -> verifies credentials, returns global access token + sets HttpOnly refresh cookie + returns available tenants.
+    2. Tenant selection (`POST /api/v1/auth/select-tenant`) -> validates active membership and active store status, returns tenant-scoped access token + sets updated HttpOnly refresh cookie.
+  - Live account verification: `JwtAuthenticationFilter` validates user `ACTIVE` status, tenant `ACTIVE` status, membership `ACTIVE` status, and membership ownership/claim consistency on every request.
+  - Tenant context lifecycle: `TenantContextHolder` bound only after all live verifications succeed, guaranteed cleanup in `try ... finally { clear(); }`.
+  - Tenant switching cache isolation: `queryClient.clear()` purges all cached query data from the old store, preventing stale data leakage across tenants.
+  - Registration (`POST /api/v1/auth/register`) with atomic transaction boundaries and optional initial store setup.
+  - Logout (`POST /api/v1/auth/logout`) with instant refresh token revocation and cookie clearing (`Max-Age=0`).
   - Current identity profile endpoint (`GET /api/v1/auth/me`).
   - Spring Security stateless filter chain (`SecurityConfig`, `JwtAuthenticationFilter`, `RestAuthenticationEntryPoint`, `RestAccessDeniedHandler`, CORS configuration).
-  - Fail-closed request filter: binds `TenantContextHolder` on tenant-scoped requests and guarantees cleanup in `finally`.
   - ArchUnit architecture enforcement: verifies controllers do not directly call repositories and domain does not depend on web.
-  - Frontend FSD auth slice: Zustand persistent auth store (`useAuthStore`), Axios request/response interceptors with concurrent 401 refresh queue, `LoginPage`, `RegisterPage`, `TenantSelectPage`, `ProtectedRoute` dual-phase route guards, and Vitest unit tests.
-  - Automated test suite: 32 backend tests (PostgreSQL 16 Testcontainers) + 6 frontend Vitest tests, all passing with 100% success rate.
+  - Frontend FSD auth slice: In-memory Zustand store, TanStack Query for user profile and available tenants, Axios request/response interceptors with concurrent 401 refresh queue, `LoginPage`, `RegisterPage`, `TenantSelectPage`, `ProtectedRoute` route guards.
+  - Automated test suite: 36 backend tests (PostgreSQL 16 Testcontainers) + 10 frontend Vitest tests, all passing with 100% success rate.
