@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -232,15 +233,75 @@ public class AuthService {
 
     @Transactional(noRollbackFor = BadCredentialsException.class)
     public AuthResponse refreshToken(RefreshTokenRequest request, String ipAddress, String userAgent) {
-        String rawToken = request.getRefreshToken().trim();
-        String tokenHash = jwtTokenProvider.hashToken(rawToken);
+        String rawToken = request != null ? request.getRefreshToken() : null;
+        return refreshToken(rawToken, ipAddress, userAgent);
+    }
 
-        RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(tokenHash)
+    @Transactional(noRollbackFor = BadCredentialsException.class)
+    public AuthResponse refreshToken(String rawToken, String ipAddress, String userAgent) {
+        if (rawToken == null || rawToken.trim().isBlank()) {
+            throw new BadCredentialsException("Refresh token is required.");
+        }
+
+        String tokenHash = jwtTokenProvider.hashToken(rawToken.trim());
+
+        // Pessimistic write row-level lock serializes concurrent refresh attempts
+        RefreshToken refreshToken = refreshTokenRepository.findByTokenHashWithLock(tokenHash)
                 .orElseThrow(() -> new BadCredentialsException("Invalid refresh token."));
 
-        // Refresh token reuse detection
+        // Refresh token reuse detection with concurrency grace window
         if (refreshToken.isRevoked()) {
-            log.warn("Revoked refresh token presented! Revoking entire token family {}", refreshToken.getTokenFamily());
+            boolean isRecentRotation = "Rotated".equals(refreshToken.getRevokedReason())
+                    && refreshToken.getRevokedAt() != null
+                    && refreshToken.getRevokedAt().isAfter(Instant.now().minusSeconds(10));
+
+            if (isRecentRotation) {
+                log.debug("Concurrent refresh request within grace window for token family {}", refreshToken.getTokenFamily());
+                Optional<RefreshToken> activeChild = refreshTokenRepository
+                        .findFirstByTokenFamilyAndRevokedFalseOrderByCreatedAtDesc(refreshToken.getTokenFamily());
+
+                if (activeChild.isPresent() && activeChild.get().isValid()) {
+                    RefreshToken activeToken = activeChild.get();
+                    User user = userRepository.findById(activeToken.getUserId())
+                            .orElseThrow(() -> new BadCredentialsException("User not found."));
+
+                    if (!user.isActive()) {
+                        throw new DisabledException("User account is disabled or suspended.");
+                    }
+
+                    UUID tenantId = activeToken.getTenantId();
+                    String accessToken;
+                    if (tenantId != null) {
+                        TenantMembership membership = tenantMembershipRepository
+                                .findByTenantIdAndUserId(tenantId, user.getId())
+                                .filter(TenantMembership::isActive)
+                                .orElseThrow(() -> new AccessDeniedException("User membership is inactive."));
+
+                        accessToken = jwtTokenProvider.generateTenantAccessToken(
+                                user.getId(), user.getEmail(), tenantId, membership.getId());
+                    } else {
+                        accessToken = jwtTokenProvider.generateGlobalAccessToken(user.getId(), user.getEmail());
+                    }
+
+                    List<UserTenantMembershipDto> availableTenants = buildAvailableTenants(user.getId(), tenantId);
+                    UserTenantMembershipDto activeTenant = availableTenants.stream()
+                            .filter(UserTenantMembershipDto::isCurrent)
+                            .findFirst()
+                            .orElse(null);
+
+                    return AuthResponse.builder()
+                            .accessToken(accessToken)
+                            .refreshToken(null) // Cookie remains active
+                            .tokenType("Bearer")
+                            .expiresIn(jwtProperties.getAccessTokenExpirationSeconds())
+                            .user(toUserProfileDto(user))
+                            .activeTenant(activeTenant)
+                            .availableTenants(availableTenants)
+                            .build();
+                }
+            }
+
+            log.warn("Revoked refresh token presented outside grace window! Revoking entire token family {}", refreshToken.getTokenFamily());
             refreshTokenRepository.revokeTokenFamily(
                     refreshToken.getTokenFamily(), Instant.now(), "Token reuse detected");
             throw new BadCredentialsException("Invalid refresh token: token reuse detected.");

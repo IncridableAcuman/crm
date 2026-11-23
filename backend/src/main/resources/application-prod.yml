@@ -24,3 +24,8 @@ logging:
   level:
     com.savdocrm: INFO
     org.springframework: WARN
+
+jwt:
+  cookie-secure: true
+  cookie-same-site: Lax
+

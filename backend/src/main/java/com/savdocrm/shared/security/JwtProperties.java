@@ -30,4 +30,24 @@ public class JwtProperties {
      * Token issuer claim.
      */
     private String issuer = "savdocrm-auth";
+
+    /**
+     * Cookie name for refresh token.
+     */
+    private String cookieName = "savdocrm_refresh_token";
+
+    /**
+     * Cookie secure flag. In production, must be true.
+     */
+    private boolean cookieSecure = false;
+
+    /**
+     * Cookie SameSite attribute: Lax, Strict, or None.
+     */
+    private String cookieSameSite = "Lax";
+
+    /**
+     * Cookie path restriction.
+     */
+    private String cookiePath = "/api/v1/auth";
 }

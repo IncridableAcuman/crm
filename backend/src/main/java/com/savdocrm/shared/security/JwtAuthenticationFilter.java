@@ -1,8 +1,11 @@
 package com.savdocrm.shared.security;
 
-import tools.jackson.databind.ObjectMapper;
 import com.savdocrm.modules.identity.domain.MembershipStatus;
+import com.savdocrm.modules.identity.domain.TenantMembership;
+import com.savdocrm.modules.identity.domain.User;
 import com.savdocrm.modules.identity.infrastructure.TenantMembershipRepository;
+import com.savdocrm.modules.identity.infrastructure.UserRepository;
+import com.savdocrm.modules.tenancy.domain.Tenant;
 import com.savdocrm.modules.tenancy.domain.TenantStatus;
 import com.savdocrm.modules.tenancy.infrastructure.TenantRepository;
 import com.savdocrm.shared.multitenancy.TenantContext;
@@ -24,6 +27,7 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.net.URI;
@@ -37,6 +41,7 @@ import java.util.UUID;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider tokenProvider;
+    private final UserRepository userRepository;
     private final TenantMembershipRepository membershipRepository;
     private final TenantRepository tenantRepository;
     private final ObjectMapper objectMapper;
@@ -58,13 +63,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     UUID membershipId = tokenProvider.extractMembershipId(claims).orElse(null);
 
                     if (userId != null && email != null) {
+                        // 1. Live User status verification
+                        User user = userRepository.findById(userId).orElse(null);
+                        if (user == null || !user.isActive()) {
+                            sendForbiddenError(request, response, "User account is suspended, disabled, or no longer exists.");
+                            return;
+                        }
+
                         UserPrincipal principal = UserPrincipal.builder()
                                 .id(userId)
                                 .email(email)
-                                .password("") // Not needed in principal post-auth
+                                .password("") // Not stored in principal post-auth
                                 .activeTenantId(tenantId)
                                 .activeMembershipId(membershipId)
-                                .active(true)
+                                .active(user.isActive())
                                 .build();
 
                         UsernamePasswordAuthenticationToken authentication =
@@ -74,22 +86,35 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                         MDC.put("userId", userId.toString());
 
-                        // If token is tenant-scoped, verify live membership and tenant status
+                        // 2. Tenant-scoped verification
                         if (tenantId != null) {
-                            boolean isTenantActive = tenantRepository.findById(tenantId)
-                                    .map(t -> t.getStatus() == TenantStatus.ACTIVE)
-                                    .orElse(false);
-
-                            boolean isMembershipActive = membershipRepository
-                                    .findByTenantIdAndUserId(tenantId, userId)
-                                    .map(m -> m.getStatus() == MembershipStatus.ACTIVE)
-                                    .orElse(false);
-
-                            if (!isTenantActive || !isMembershipActive) {
-                                sendForbiddenError(request, response, "Tenant store or user membership has been suspended or revoked.");
+                            Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
+                            if (tenant == null || tenant.getStatus() != TenantStatus.ACTIVE) {
+                                sendForbiddenError(request, response, "Tenant store is suspended, inactive, or not found.");
                                 return;
                             }
 
+                            TenantMembership membership = membershipRepository
+                                    .findByTenantIdAndUserId(tenantId, userId)
+                                    .orElse(null);
+
+                            if (membership == null || membership.getStatus() != MembershipStatus.ACTIVE) {
+                                sendForbiddenError(request, response, "User does not have an active membership in the active store.");
+                                return;
+                            }
+
+                            // Verify ownership and claim consistency
+                            if (!membership.getUserId().equals(userId) || !membership.getTenantId().equals(tenantId)) {
+                                sendForbiddenError(request, response, "Tenant membership ownership inconsistency detected.");
+                                return;
+                            }
+
+                            if (membershipId != null && !membership.getId().equals(membershipId)) {
+                                sendForbiddenError(request, response, "Tenant membership claim mismatch.");
+                                return;
+                            }
+
+                            // Bound only after all checks pass
                             TenantContextHolder.setContext(TenantContext.of(tenantId, "JWT_AUTH"));
                             MDC.put("tenantId", tenantId.toString());
                         }
@@ -121,7 +146,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, detail);
         problem.setType(URI.create("https://savdocrm.com/errors/forbidden"));
-        problem.setTitle("Tenant Access Forbidden");
+        problem.setTitle("Access Forbidden");
         problem.setInstance(URI.create(request.getRequestURI()));
         problem.setProperty("timestamp", Instant.now().toString());
 

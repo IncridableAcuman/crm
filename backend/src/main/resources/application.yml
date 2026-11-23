@@ -35,4 +35,9 @@ jwt:
   access-token-expiration-seconds: ${JWT_ACCESS_EXPIRATION:900}
   refresh-token-expiration-seconds: ${JWT_REFRESH_EXPIRATION:2592000}
   issuer: ${JWT_ISSUER:savdocrm-auth}
+  cookie-name: ${JWT_COOKIE_NAME:savdocrm_refresh_token}
+  cookie-secure: ${JWT_COOKIE_SECURE:false}
+  cookie-same-site: ${JWT_COOKIE_SAME_SITE:Lax}
+  cookie-path: ${JWT_COOKIE_PATH:/api/v1/auth}
+
 
