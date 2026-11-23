@@ -54,5 +54,18 @@ class PostgresLiquibaseMigrationIntegrationTest {
                 Integer.class
         );
         assertThat(changesetCount).isNotNull().isEqualTo(1);
+
+        // Verify changeset 07 removed successor_token_encrypted while preserving successor_token_hash
+        Integer encryptedColCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'refresh_tokens' AND column_name = 'successor_token_encrypted'",
+                Integer.class
+        );
+        assertThat(encryptedColCount).isNotNull().isEqualTo(0);
+
+        Integer hashColCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'refresh_tokens' AND column_name = 'successor_token_hash'",
+                Integer.class
+        );
+        assertThat(hashColCount).isNotNull().isEqualTo(1);
     }
 }

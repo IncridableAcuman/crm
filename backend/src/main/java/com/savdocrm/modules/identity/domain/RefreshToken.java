@@ -65,9 +65,6 @@ public class RefreshToken {
     @Column(name = "user_agent", columnDefinition = "TEXT")
     private String userAgent;
 
-    @Column(name = "successor_token_encrypted", columnDefinition = "TEXT")
-    private String successorTokenEncrypted;
-
     @Column(name = "successor_token_hash", length = 64)
     private String successorTokenHash;
 
@@ -85,11 +82,10 @@ public class RefreshToken {
         this.revokedReason = reason;
     }
 
-    public void rotate(String successorEncrypted, String successorHash) {
+    public void rotate(String successorHash) {
         this.revoked = true;
         this.revokedAt = Instant.now();
         this.revokedReason = "Rotated";
-        this.successorTokenEncrypted = successorEncrypted;
         this.successorTokenHash = successorHash;
     }
 }

@@ -12,5 +12,6 @@
     <include file="db/changelog/v1.0.0/04-create-tenant-memberships.xml"/>
     <include file="db/changelog/v1.0.0/05-create-refresh-tokens.xml"/>
     <include file="db/changelog/v1.0.0/06-add-successor-token-encrypted.xml"/>
+    <include file="db/changelog/v1.0.0/07-remove-successor-token-encrypted.xml"/>
 
 </databaseChangeLog>

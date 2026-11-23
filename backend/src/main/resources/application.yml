@@ -32,7 +32,7 @@ springdoc:
 
 jwt:
   secret: ${JWT_SECRET:v8y/B?E(H+MbQeThWmZq4t7w!z%C*F-J@NcRfUjXn2r5u8x/A?D(G+KbPdSgVkYp}
-  encryption-secret: ${JWT_ENCRYPTION_SECRET:savdocrm-dedicated-token-encryption-secret-key-32b!}
+  encryption-secret: ${JWT_ENCRYPTION_SECRET:}
   access-token-expiration-seconds: ${JWT_ACCESS_EXPIRATION:900}
   refresh-token-expiration-seconds: ${JWT_REFRESH_EXPIRATION:2592000}
   issuer: ${JWT_ISSUER:savdocrm-auth}
@@ -40,6 +40,9 @@ jwt:
   cookie-secure: ${JWT_COOKIE_SECURE:false}
   cookie-same-site: ${JWT_COOKIE_SAME_SITE:Lax}
   cookie-path: ${JWT_COOKIE_PATH:/api/v1/auth}
+
+security:
+  trusted-proxies: ${SECURITY_TRUSTED_PROXIES:127.0.0.1,::1,0:0:0:0:0:0:0:1}
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000}

@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-SAVDOCRM Milestone 03 delivers a production-grade, multi-tenant authentication and session management subsystem for retail store management. It implements a **Dual-Phase JWT Authentication Model** with cryptographically secure refresh token rotation, authenticated encryption for successor recovery during grace windows, token reuse compromise quarantine, server-side tenant isolation enforcement, and an in-memory frontend session architecture powered by HttpOnly cookies and TanStack Query.
+SAVDOCRM Milestone 03 delivers a production-grade, multi-tenant authentication and session management subsystem for retail store management. It implements a **Stateless Dual-Phase JWT Authentication Model** with **Strict Single-Use Refresh Token Rotation (RTR)**, immediate token reuse compromise quarantine, row-level PostgreSQL locking (`PESSIMISTIC_WRITE`), trusted reverse proxy IP resolution, strict CSRF origin validation, and client-side cross-tab coordination powered by the Web Locks API, BroadcastChannel, and in-memory Zustand state.
 
 ---
 
@@ -14,6 +14,7 @@ The Identity domain defines three persistent entities:
 ┌────────────────┐          ┌──────────────────────┐          ┌────────────────┐
 │      User      │ 1      * │   TenantMembership   │ *      1 │     Tenant     │
 │  (Global Identity)◄───────┤ (Membership Context) ├─────────►│(Tenancy Module)│
+│                │          │                      │          │(Active Store)  │
 └───────┬────────┘          └──────────────────────┘          └────────────────┘
         │ 1
         │
@@ -39,7 +40,7 @@ Links a global `User` to a specific `Tenant`.
   - `uq_memberships_tenant_id`: Composite candidate key for tenant-partitioned references.
 
 ### 2.3 RefreshToken
-Opaque cryptographically secure session record with token family tracking and encrypted successor token storage.
+Opaque cryptographically secure session record with token family tracking and strict single-use rotation semantics.
 - **Table**: `refresh_tokens`
 - **Fields**:
   - `id` (UUIDv4)
@@ -50,13 +51,12 @@ Opaque cryptographically secure session record with token family tracking and en
   - `revoked` (boolean)
   - `revoked_at` (TIMESTAMP WITH TIME ZONE)
   - `revoked_reason` (VARCHAR(100))
-  - `successor_token_encrypted` (TEXT, AES-256-GCM encrypted payload)
-  - `successor_token_hash` (VARCHAR(64) SHA-256 of successor)
+  - `successor_token_hash` (VARCHAR(64) SHA-256 of successor token, retained for cryptographic audit lineage)
   - `expires_at` (TIMESTAMP WITH TIME ZONE)
   - `created_at` (TIMESTAMP WITH TIME ZONE)
   - `created_ip` (VARCHAR(50))
   - `user_agent` (TEXT)
-- **Security**: Raw refresh tokens (32 secure random bytes, Base64URL encoded) are never persisted in plaintext. The token itself is stored as a SHA-256 hash. When rotated, its successor is encrypted using AES-256-GCM with a server-derived key for short-lived grace-window idempotent recovery.
+- **Security**: Raw refresh tokens (32 secure random bytes, Base64URL encoded) are never persisted in plaintext. The token itself is stored as a SHA-256 hash. When consumed, the token is revoked with `revoked_reason = 'Rotated'` and its successor's hash is stored in `successor_token_hash` to preserve cryptographic audit lineage without storing sensitive raw token material.
 
 ---
 
@@ -92,7 +92,7 @@ jwt:
 ### Topology A: Same-Site Cross-Origin Deployment
 - **Architecture**: Frontend at `https://app.savdocrm.com` and backend API at `https://api.savdocrm.com`. Both share the registrable domain `savdocrm.com` (Same-Site).
 - **Cookie Policy**: `SameSite=Lax; Secure; HttpOnly; Path=/api/v1/auth`.
-- **CSRF Defense**: Modern browsers do not attach `SameSite=Lax` cookies to cross-site `POST` requests. In addition, the backend enforces explicit `Origin` validation against the configured `cors.allowed-origins`.
+- **CSRF Defense**: Modern browsers do not attach `SameSite=Lax` cookies to cross-site `POST` requests. In addition, the backend enforces explicit `Origin` validation against configured `cors.allowed-origins`.
 
 ### Topology B: Cross-Site Deployment
 - **Architecture**: Frontend at `https://store-app.com` and backend at `https://savdocrm-api.com` (different registrable domains).
@@ -109,53 +109,106 @@ jwt:
 
 ---
 
-## 5. Refresh Token Security Protocol, Key Management & Replay Analysis
+## 5. Strict Single-Use Refresh Token Protocol & Concurrency Hardening
 
-### 5.1 The Replay Threat During Server Grace Windows
-In traditional server-side grace windows, when token $T_0$ is rotated to $T_1$, the server accepts $T_0$ for a brief period (e.g. 10s) and returns $T_1$.
-**Critical Threat**: If an attacker steals $T_0$, they can replay $T_0$ during the 10-second grace window after legitimate rotation. Because bearer tokens possess no sender-identity proof, the server cannot distinguish between:
-1. A legitimate concurrent browser request or lost-response retry.
-2. A replay attack by an attacker holding the stolen bearer credential.
+### 5.1 Protocol Specification
 
-Neither row-level locking (`PESSIMISTIC_WRITE`) nor AES-256-GCM encryption solves this threat:
-- Row-level locking only serializes database operations.
-- AES-256-GCM only guarantees confidentiality and integrity at rest in PostgreSQL; it does not authenticate the requester.
+The refresh token subsystem enforces strict single-use semantics:
 
-### 5.2 Selected Defense Architecture
-To minimize replay risk while preserving seamless multi-tab usability, SAVDOCRM implements a multi-layer defense:
+1. **Exact Single-Use**: A refresh token can be successfully consumed exactly once.
+2. **Zero Grace Window**: Any grace window recovery is removed. A revoked refresh token is NEVER accepted and NEVER returns its successor.
+3. **Immediate Family Revocation on Replay**: Any attempt to consume an already-revoked refresh token is treated as an active session compromise signal. The server immediately revokes the **entire token family**:
+   ```sql
+   UPDATE refresh_tokens SET revoked = true, revoked_at = now(), revoked_reason = 'Token reuse detected' WHERE token_family = :family;
+   ```
+4. **PostgreSQL Row-Level Locking**: Concurrency is serialized at the database layer using pessimistic write locks (`findByTokenHashWithLock` with `LockModeType.PESSIMISTIC_WRITE` generating `SELECT ... FOR UPDATE`).
+5. **Transactional Consistency**: Marked with `@Transactional(noRollbackFor = BadCredentialsException.class)` so that compromise quarantine (family revocation) commits to PostgreSQL even when throwing `401 Unauthorized` (`BadCredentialsException`).
 
-1. **Frontend Cross-Tab & Single-Flight Coordination (Web Locks API + BroadcastChannel)**:
-   - Modern browsers coordinate refresh calls across all open tabs using the **Web Locks API** (`navigator.locks.request('savdocrm_refresh_lock', ...)`).
-   - Only one tab across all windows executes `/api/v1/auth/refresh` at any time.
-   - When the active tab finishes, it broadcasts `REFRESH_SUCCESS` with the new access token via `BroadcastChannel`.
-   - Queued tabs acquire the lock, detect that the token was already refreshed, and reuse the new token without sending any additional network requests.
-   - If the active tab closes or crashes, the browser engine automatically releases the Web Lock, avoiding deadlocks.
-   - Within each tab, an Axios concurrency queue (`isRefreshing` + `failedQueue`) serializes concurrent 401 interceptor executions.
+### 5.2 Intentional Lost Response Behavior
 
-2. **Backend Client Session Verification During Grace Window**:
-   - When a revoked token is presented within the 10-second grace window:
-     - The server verifies client context: `token.created_ip == request.ip` and `token.user_agent == request.userAgent`.
-     - **Second-Client Replay Detection**: If an attacker from a different IP or User-Agent presents $T_0$, the server immediately detects the replay, **revokes the entire token family**, and returns `401 Unauthorized`.
-     - **Same-Session Concurrency / Lost Response**: If client fingerprint matches, the successor $T_1$ is recovered from authenticated AES-256-GCM storage and returned in `Set-Cookie`.
+If the backend successfully commits token rotation to the database but the HTTP response is lost over the network (e.g., client drops connection, socket timeout, Wi-Fi blip):
+- The browser still possesses the old refresh token $T_0$.
+- Retrying $T_0$ is treated by the server as a replay attempt because $T_0$ was already rotated to $T_1$ and marked revoked.
+- The server revokes the entire token family (invalidating $T_1$ as well) and returns `401 Unauthorized`.
+- The user must re-authenticate (login).
 
-3. **Cryptographic Key Management (HKDF & Key Rotation)**:
-   - Token encryption key is derived using RFC 5869 **HKDF-SHA256** with domain separation (`savdocrm-hkdf-token-encryption-salt-v1` and dedicated context info).
-   - Dedicated configuration property `jwt.encryption-secret` decouples token encryption from JWT signing (`jwt.secret`).
-   - **Key Versioning & Keyring**: Encrypted tokens carry a version prefix (e.g. `v1:<payload>`, `v2:<payload>`). During key rotation, `TokenEncryptionService.rotateKey(newVersion, newSecret)` registers the new active key while retaining historical keys in a keyring. Existing active sessions encrypted under historical keys decrypt seamlessly without interruption.
+**Security-First Rationale**: In enterprise retail SaaS, bearer tokens cannot prove sender identity over shared public IPs or corporate NATs. Silently recovering sessions on old token presentation would re-open the replay window for attackers possessing stolen tokens. Compromise isolation strictly takes precedence over transient network reconnection.
 
-4. **Encrypted Successor Database Cleanup**:
-   - `successor_token_encrypted` is only required during the 10-second grace window. Retaining recoverable token plaintext in PostgreSQL indefinitely is a security liability.
-   - Automatic cleanup is executed during token rotation and via `AuthService.cleanupExpiredSuccessorTokens(Instant cutoff)`:
-     - Sets `successor_token_encrypted = NULL` for all tokens where `revoked = true` and `revoked_at < cutoff`.
-     - Preserves `successor_token_hash` (SHA-256) permanently for security auditing, forensic lineage analysis, and reuse detection.
+### 5.3 Client-Side Cross-Tab Coordination (Web Locks API + BroadcastChannel)
 
-5. **Residual Risks & Trade-Offs**:
-   - **Same-IP/Same-UA Replay Window**: If an attacker on the same NAT IP (e.g. corporate WiFi) also spoofs the victim's User-Agent header, they could theoretically replay $T_0$ within the 10-second window. Cryptographically unforgeable proof-of-possession would require sender-constraining (DPoP, RFC 9449). However, DPoP introduces high architectural overhead (WebCrypto key management, client-side proof signing per request, nonce stores, and replay caches) that was deemed disproportionate for a browser SaaS already fortified by HttpOnly SameSite=Lax Secure cookies, exact Origin validation, and Web Locks.
-   - **Lost Response Availability Trade-Off**: If a network failure occurs after server commit and retry happens after the 10s grace window has elapsed (or if IP changed), the server treats the request as reuse and revokes the family. The user must re-authenticate (login). In financial and CRM enterprise SaaS, security (preventing replay attacks) strictly takes precedence over rare transient network reconnects.
+To prevent race conditions between browser tabs without server-side grace windows, the frontend implements multi-tier synchronization:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant TabA as Tab A (Elected Refresher)
+    participant TabB as Tab B (Waiting Tab)
+    participant WebLock as Web Locks API ('savdocrm_refresh_lock')
+    participant Channel as BroadcastChannel ('savdocrm_auth_channel')
+    participant Storage as localStorage ('savdocrm_session_state')
+    participant Backend as Backend (/api/v1/auth/refresh)
+
+    TabA->>WebLock: request('savdocrm_refresh_lock')
+    Note over TabA,WebLock: Tab A acquires lock
+    TabB->>WebLock: request('savdocrm_refresh_lock')
+    Note over TabB,WebLock: Tab B waits for lock
+
+    TabA->>Backend: POST /api/v1/auth/refresh (HttpOnly Cookie T0)
+    Backend-->>TabA: 200 OK + Set-Cookie (T1) + new AccessToken
+    TabA->>Storage: Update epoch & timestamp (NO TOKENS)
+    TabA->>Channel: postMessage(REFRESH_SUCCESS, AccessToken)
+    Note over TabA: Releases Web Lock
+
+    WebLock-->>TabB: Lock granted
+    TabB->>TabB: Check if token already updated by Tab A
+    Note over TabB: Sees latestToken !== currentToken
+    TabB-->>User: Reuses AccessToken (NO HTTP /refresh sent!)
+    Note over TabB: Releases Web Lock
+```
+
+1. **Web Locks API (`navigator.locks.request('savdocrm_refresh_lock', ...)`):**
+   - Mutual exclusion across all tabs and windows under the same origin.
+   - Only one tab initiates the HTTP refresh call.
+   - **Tab Crash Resilience**: If the holding tab crashes or terminates, the browser engine automatically releases the Web Lock.
+2. **Post-Acquisition Verification:**
+   - After acquiring the lock, a waiting tab inspects `useAuthStore.getState().accessToken` and the shared session epoch. If another tab already rotated the token, it reuses the fresh in-memory access token without sending any network request.
+3. **BroadcastChannel Synchronization (`savdocrm_auth_channel`):**
+   - A successful refresh emits `REFRESH_SUCCESS` carrying the new `accessToken` and `activeTenant`.
+   - **Critical Security Invariant**: The `refreshToken` is **NEVER** broadcast over `BroadcastChannel`. It remains exclusively in the browser's HttpOnly cookie jar.
+   - A failed refresh emits `AUTH_CLEARED`, immediately wiping state and clearing queries across all tabs.
+4. **Missed Broadcast Defense & Zero Token Persistence:**
+   - A non-token shared session metadata record is maintained in `localStorage` (`savdocrm_session_state: { state: 'AUTHENTICATED' | 'UNAUTHENTICATED', timestamp, refreshEpoch }`).
+   - If a tab was backgrounded or asleep and missed an `AUTH_CLEARED` broadcast, its request interceptor checks `getSharedSessionState()`. If marked `UNAUTHENTICATED`, the tab aborts immediately without attempting to reuse stale in-memory tokens.
+   - Neither access tokens nor refresh tokens are EVER stored in `localStorage` or `sessionStorage`.
+5. **Fallback Strategy**:
+   - For environments lacking the Web Locks API, the client falls back to an in-tab single-flight concurrency queue (`isRefreshing` + `failedQueue`).
 
 ---
 
-## 6. Global Token vs Tenant-Scoped Token Architecture
+## 6. Reverse Proxy & Trusted Client IP Resolution
+
+In cloud and containerized deployments, backend applications run behind reverse proxies or load balancers (e.g., NGINX, AWS ALB, Cloudflare).
+- To prevent IP spoofing in audit logs and security telemetry, `ClientIpResolver` inspects `X-Forwarded-For` **only when the direct connection originates from a configured trusted proxy** (`security.trusted-proxies`).
+- If an untrusted direct client provides an `X-Forwarded-For` header, it is completely ignored, and `request.getRemoteAddr()` is recorded.
+
+---
+
+## 7. Database Migration & Safe Retention Cleanup
+
+### 7.1 Liquibase Changeset Summary
+1. `v1.0.0-05-create-refresh-tokens`: Created `refresh_tokens` table with SHA-256 token hashing, `token_family`, tenant context, and revocation metadata.
+2. `v1.0.0-06-add-successor-token-encrypted`: Added encrypted successor token columns (deprecated).
+3. `v1.0.0-07-remove-successor-token-encrypted`: Safely drops `successor_token_encrypted` column while preserving `successor_token_hash` for audit and security analysis. Rollback re-adds the column as nullable.
+
+### 7.2 Retention & Cleanup Strategy
+- Active tokens remain valid until expiration.
+- Rotated tokens are preserved with their `successor_token_hash`, revocation timestamp, and revocation reason for compromise analysis and forensic auditing.
+- `AuthService.cleanupExpiredRevokedTokens(Instant cutoff)` purges revoked tokens where `expires_at < cutoff` (e.g., older than 90 days), preserving audit integrity while bounding table growth.
+
+---
+
+## 8. Global Token vs Tenant-Scoped Token Architecture
 
 SAVDOCRM strictly distinguishes between global identity and active tenant authorization:
 
@@ -170,66 +223,13 @@ SAVDOCRM strictly distinguishes between global identity and active tenant author
 
 ---
 
-## 7. Tenant Switching & Query Cache Isolation
+## 9. Verification & Test Evidence
 
-```mermaid
-flowchart TD
-    A["User Selects Store<br/>(POST /api/v1/auth/select-tenant)"] --> B["Frontend: cancelQueries()<br/>Abort in-flight requests for old tenant"]
-    B --> C["Backend verifies active User, Tenant & Membership"]
-    C --> D["Backend returns new tenant-scoped access token + rotated cookie"]
-    D --> E["Frontend: queryClient.clear()<br/>Purge entire cache of previous store data"]
-    E --> F["Update Zustand in-memory activeTenant & accessToken"]
-    F --> G["Navigate to Dashboard / Fetch fresh store data"]
-```
-
----
-
-## 8. Logout & Session Revocation
-
-When `POST /api/v1/auth/logout` is called:
-1. The backend extracts the refresh token from the HttpOnly cookie.
-2. `AuthService.logout` queries the token family and executes:
-   ```sql
-   UPDATE refresh_tokens SET revoked = true, revoked_at = now(), revoked_reason = 'User logout' WHERE token_family = :family;
-   ```
-   **The entire token family is revoked**, preventing any token from that session from ever restoring access.
-3. The response returns `Set-Cookie: savdocrm_refresh_token=; Path=/api/v1/auth; Max-Age=0; HttpOnly; SameSite=...`.
-4. Logout is publicly accessible and succeeds even if the caller's access token is expired.
-5. On the frontend, `queryClient.cancelQueries()`, `useAuthStore.clearAuth()`, and `queryClient.clear()` purge all client-side state.
-
----
-
-## 9. Test Verification Summary
-
-The test suite validates all security guarantees against PostgreSQL 16 Testcontainers:
-- **Backend Tests**: 57 / 57 passed (0 failures)
-  - `shouldRecoverOriginalRawSuccessorTokenViaHttpOnlyCookieDuringGracePeriodWithoutCreatingNewToken`
-  - `shouldHandleConcurrentRefreshRequestsGracefully`
-  - `shouldDetectRefreshTokenReuseOutsideGracePeriodAndRevokeEntireFamily`
-  - `shouldDetectRefreshTokenReplayBySecondClientAndRevokeEntireFamily`
-  - `shouldRecoverSuccessorDuringNetworkFailureOrLostResponseFromSameBrowserSession`
-  - `shouldRejectExpiredRefreshToken`
-  - `shouldAllowSuccessorRecoveryAcrossEncryptionKeyRotation`
-  - `shouldRejectCookieRefreshWithMissingOriginAndMissingReferer`
-  - `shouldRejectCookieRefreshWithNullOrigin`
-  - `shouldRejectCookieRefreshWithUnauthorizedReferer`
-  - `shouldAllowCookieRefreshWithAuthorizedRefererFallback`
-  - `shouldCleanUpExpiredEncryptedSuccessorMaterialWhilePreservingTokenHash`
-  - `shouldFailClosedWhenGlobalTokenAccessesTenantProtectedBranchEndpoint`
-  - `shouldRejectGlobalTokenEvenWithXTenantIdHeader`
-  - `shouldAllowTenantScopedTokenToAccessBranchEndpoint`
-  - `shouldRejectTenantTokenWithMismatchingMembershipIdClaim`
-  - `shouldRevokeEntireSessionFamilyOnLogoutAndPreventRestoringSession`
-  - `shouldRejectCookieRefreshWithDisallowedOriginDueToCsrfProtection`
-  - `shouldRejectRequestsWhenUserIsSuspended`
-  - `shouldRejectRequestsWhenTenantIsSuspended`
-  - `shouldRejectRequestsWhenMembershipIsSuspended`
-  - `TokenEncryptionServiceTest` (HKDF key derivation, unique IV per encryption, authenticated decryption, key rotation with multiple key versions, legacy payload compatibility)
-  - ArchUnit architecture enforcement rules
-- **Frontend Tests**: 14 / 14 passed (0 failures) across 4 Vitest test suites
-  - Cross-tab refresh coordination using Web Locks API
-  - Token reuse on concurrent tab wake-up
-  - BroadcastChannel synchronization (`REFRESH_SUCCESS`, `AUTH_CLEARED`)
-  - Single-flight 401 response queue
-  - Tenant switching cache eviction
-- **Build**: `./gradlew test` and `npm run build` both succeeded with zero errors.
+All protocol behaviors are verified against real PostgreSQL 16 Testcontainers:
+- **Strict single-use rotation**: Consumes old token, issues new token, marks old as `Rotated` with successor hash.
+- **Immediate replay detection**: Replaying an old token returns 401 Unauthorized and revokes the whole family.
+- **Concurrent requests**: Two simultaneous requests with the same old token result in exactly one 200 OK and one 401 replay detection revoking the family.
+- **Lost response recovery failure**: Retrying old token after network loss revokes family and requires re-login.
+- **Logout family revocation**: Calling `/logout` revokes all family tokens and clears the HttpOnly cookie (`Max-Age=0`).
+- **CSRF defenses**: Exact Origin validation, `Origin: null` rejection, authorized Referer fallback, rejection when both are missing on cookie requests, and wildcard origin prohibition.
+- **Frontend coordination**: 18 Vitest tests validating in-tab queue, Web Locks mutual exclusion, BroadcastChannel event sync, missed broadcast protection, and zero token storage.

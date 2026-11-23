@@ -17,8 +17,8 @@ public class JwtProperties {
     private String secret = "v8y/B?E(H+MbQeThWmZq4t7w!z%C*F-J@NcRfUjXn2r5u8x/A?D(G+KbPdSgVkYp";
 
     /**
-     * Dedicated secret key for token encryption (AES-256-GCM).
-     * If not explicitly configured, falls back to HKDF derivation from secret with domain separation.
+     * Dedicated secret key for token encryption.
+     * Retained for backward-compatible environment binding; obsolete under strict single-use rotation.
      */
     private String encryptionSecret;
 

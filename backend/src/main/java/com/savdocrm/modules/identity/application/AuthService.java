@@ -9,12 +9,12 @@ import com.savdocrm.modules.identity.application.dto.UserProfileDto;
 import com.savdocrm.modules.identity.application.dto.UserTenantMembershipDto;
 import com.savdocrm.modules.identity.domain.MembershipStatus;
 import com.savdocrm.modules.identity.domain.RefreshToken;
+import com.savdocrm.modules.identity.domain.TenantMembership;
 import com.savdocrm.modules.identity.domain.User;
 import com.savdocrm.modules.identity.domain.UserStatus;
 import com.savdocrm.modules.identity.infrastructure.RefreshTokenRepository;
 import com.savdocrm.modules.identity.infrastructure.TenantMembershipRepository;
 import com.savdocrm.modules.identity.infrastructure.UserRepository;
-import com.savdocrm.modules.identity.domain.TenantMembership;
 import com.savdocrm.modules.tenancy.application.BranchService;
 import com.savdocrm.modules.tenancy.application.dto.CreateBranchCommand;
 import com.savdocrm.modules.tenancy.domain.Tenant;
@@ -23,7 +23,6 @@ import com.savdocrm.modules.tenancy.infrastructure.TenantRepository;
 import com.savdocrm.shared.multitenancy.TenantExecutionTemplate;
 import com.savdocrm.shared.security.JwtProperties;
 import com.savdocrm.shared.security.JwtTokenProvider;
-import com.savdocrm.shared.security.TokenEncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -37,7 +36,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -54,7 +52,6 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtProperties jwtProperties;
     private final PasswordEncoder passwordEncoder;
-    private final TokenEncryptionService tokenEncryptionService;
 
     @Transactional
     public AuthResponse register(RegisterRequest request, String ipAddress, String userAgent) {
@@ -251,82 +248,11 @@ public class AuthService {
         RefreshToken refreshToken = refreshTokenRepository.findByTokenHashWithLock(tokenHash)
                 .orElseThrow(() -> new BadCredentialsException("Invalid refresh token."));
 
-        // Refresh token reuse detection with concurrency grace window
+        // Strict Single-Use Rotation: A revoked refresh token can NEVER return its successor
+        // Any presentation of a revoked refresh token is an immediate replay attempt triggering full family revocation
         if (refreshToken.isRevoked()) {
-            boolean isRecentRotation = "Rotated".equals(refreshToken.getRevokedReason())
-                    && refreshToken.getRevokedAt() != null
-                    && refreshToken.getRevokedAt().isAfter(Instant.now().minusSeconds(10));
-
-            if (isRecentRotation && refreshToken.getSuccessorTokenEncrypted() != null) {
-                // Verify request sender identity against original token session
-                boolean isSameClient = isSameClientSession(refreshToken, ipAddress, userAgent);
-
-                if (!isSameClient) {
-                    log.warn("Refresh token replay detected from second client during grace window for family {}! Expected IP: {}, Actual IP: {}, Expected UA: {}, Actual UA: {}. Revoking entire token family.",
-                            refreshToken.getTokenFamily(), refreshToken.getCreatedIp(), ipAddress, refreshToken.getUserAgent(), userAgent);
-                    refreshTokenRepository.revokeTokenFamily(
-                            refreshToken.getTokenFamily(), Instant.now(), "Token replay detected from second client");
-                    throw new BadCredentialsException("Invalid refresh token: token replay detected.");
-                }
-
-                log.debug("Concurrent refresh request within grace window from same browser session for token family {}", refreshToken.getTokenFamily());
-
-                try {
-                    String decryptedSuccessorToken = tokenEncryptionService.decrypt(refreshToken.getSuccessorTokenEncrypted());
-                    String expectedSuccessorHash = refreshToken.getSuccessorTokenHash();
-
-                    if (decryptedSuccessorToken != null && expectedSuccessorHash != null) {
-                        String actualDecryptedHash = jwtTokenProvider.hashToken(decryptedSuccessorToken);
-                        if (expectedSuccessorHash.equals(actualDecryptedHash)) {
-                            Optional<RefreshToken> successorOpt = refreshTokenRepository.findByTokenHash(expectedSuccessorHash);
-                            if (successorOpt.isPresent() && successorOpt.get().isValid()
-                                    && successorOpt.get().getTokenFamily().equals(refreshToken.getTokenFamily())) {
-                                RefreshToken activeSuccessor = successorOpt.get();
-                                User user = userRepository.findById(activeSuccessor.getUserId())
-                                        .orElseThrow(() -> new BadCredentialsException("User not found."));
-
-                                if (!user.isActive()) {
-                                    throw new DisabledException("User account is disabled or suspended.");
-                                }
-
-                                UUID tenantId = activeSuccessor.getTenantId();
-                                String accessToken;
-                                if (tenantId != null) {
-                                    TenantMembership membership = tenantMembershipRepository
-                                            .findByTenantIdAndUserId(tenantId, user.getId())
-                                            .filter(TenantMembership::isActive)
-                                            .orElseThrow(() -> new AccessDeniedException("User membership is inactive."));
-
-                                    accessToken = jwtTokenProvider.generateTenantAccessToken(
-                                            user.getId(), user.getEmail(), tenantId, membership.getId());
-                                } else {
-                                    accessToken = jwtTokenProvider.generateGlobalAccessToken(user.getId(), user.getEmail());
-                                }
-
-                                List<UserTenantMembershipDto> availableTenants = buildAvailableTenants(user.getId(), tenantId);
-                                UserTenantMembershipDto activeTenant = availableTenants.stream()
-                                        .filter(UserTenantMembershipDto::isCurrent)
-                                        .findFirst()
-                                        .orElse(null);
-
-                                return AuthResponse.builder()
-                                        .accessToken(accessToken)
-                                        .refreshToken(decryptedSuccessorToken)
-                                        .tokenType("Bearer")
-                                        .expiresIn(jwtProperties.getAccessTokenExpirationSeconds())
-                                        .user(toUserProfileDto(user))
-                                        .activeTenant(activeTenant)
-                                        .availableTenants(availableTenants)
-                                        .build();
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to recover successor token during grace window: {}", e.getMessage());
-                }
-            }
-
-            log.warn("Revoked refresh token presented outside grace window! Revoking entire token family {}", refreshToken.getTokenFamily());
+            log.warn("Refresh token replay detected for token family {}! Revoked at: {}, Reason: {}, Request IP: {}, User-Agent: {}. Revoking entire token family.",
+                    refreshToken.getTokenFamily(), refreshToken.getRevokedAt(), refreshToken.getRevokedReason(), ipAddress, userAgent);
             refreshTokenRepository.revokeTokenFamily(
                     refreshToken.getTokenFamily(), Instant.now(), "Token reuse detected");
             throw new BadCredentialsException("Invalid refresh token: token reuse detected.");
@@ -366,19 +292,15 @@ public class AuthService {
             membershipId = membership.getId();
         }
 
-        // Issue new refresh token within the same token family
+        // Strict single-use rotation: Issue new refresh token within the same token family
         String newRawRefreshToken = jwtTokenProvider.generateRawRefreshToken();
         String newSuccessorHash = jwtTokenProvider.hashToken(newRawRefreshToken);
         createAndSaveRefreshToken(
                 user.getId(), tenantId, refreshToken.getTokenFamily(), newRawRefreshToken, ipAddress, userAgent);
 
-        // Encrypt the successor token using AES-256-GCM for idempotent grace window recovery
-        String encryptedSuccessor = tokenEncryptionService.encrypt(newRawRefreshToken);
-        refreshToken.rotate(encryptedSuccessor, newSuccessorHash);
+        // Revoke the old token immediately, linking the successor hash for cryptographic audit lineage
+        refreshToken.rotate(newSuccessorHash);
         refreshTokenRepository.save(refreshToken);
-
-        // Clean up expired encrypted successor material older than grace cutoff (10 seconds)
-        refreshTokenRepository.clearExpiredSuccessorTokens(Instant.now().minusSeconds(10));
 
         String newAccessToken;
         if (tenantId != null) {
@@ -506,22 +428,8 @@ public class AuthService {
     }
 
     @Transactional
-    public int cleanupExpiredSuccessorTokens(Instant cutoff) {
-        log.debug("Cleaning up expired encrypted successor tokens older than {}", cutoff);
-        return refreshTokenRepository.clearExpiredSuccessorTokens(cutoff);
-    }
-
-    private boolean isSameClientSession(RefreshToken token, String ipAddress, String userAgent) {
-        if (token.getCreatedIp() != null && ipAddress != null) {
-            if (!token.getCreatedIp().trim().equalsIgnoreCase(ipAddress.trim())) {
-                return false;
-            }
-        }
-        if (token.getUserAgent() != null && userAgent != null) {
-            if (!token.getUserAgent().trim().equals(userAgent.trim())) {
-                return false;
-            }
-        }
-        return true;
+    public int cleanupExpiredRevokedTokens(Instant cutoff) {
+        log.debug("Cleaning up expired revoked tokens older than cutoff: {}", cutoff);
+        return refreshTokenRepository.deleteExpiredRevokedTokens(cutoff);
     }
 }

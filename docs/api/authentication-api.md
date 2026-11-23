@@ -293,6 +293,14 @@ Retrieves current identity profile and available store memberships.
 ### 3.2 CSRF Protection on Cookie Endpoints
 - Requests using refresh cookies (`POST /refresh`, `POST /logout`) validate the HTTP `Origin` header against explicit whitelist `cors.allowed-origins`. Unlisted cross-site origins receive `403 Forbidden`.
 
-### 3.3 Idempotent Rotation in 10s Grace Window
-- Within 10 seconds of rotation, replaying the old token returns the exact same successor token via `Set-Cookie` using AES-256-GCM authenticated recovery. No new token is minted.
-- Replaying the old token after 10 seconds revokes the entire token family (`401 Unauthorized: token reuse detected`).
+### 3.3 Strict Single-Use Refresh Token Protocol & Compromise Quarantine
+- **Strict Single-Use**: Each refresh token is consumed exactly once. Successful rotation revokes the old token (`revoked_reason = 'Rotated'`) and emits exactly one successor.
+- **Zero Grace Window**: Revoked tokens are never accepted and never return their successor.
+- **Compromise Quarantine**: Presenting an already-revoked refresh token is treated as an active replay attack. The entire `token_family` is immediately revoked in PostgreSQL, invalidating all associated tokens and returning `401 Unauthorized: token reuse detected`.
+- **Lost Response Behavior**: If the backend successfully commits token rotation but the HTTP response is lost over the network:
+  - The client still possesses the old token.
+  - Retrying the old token is treated as reuse.
+  - The entire token family is revoked.
+  - The client must re-authenticate (`POST /api/v1/auth/login`).
+  This is an intentional security-first trade-off prioritizing replay protection over transient network recovery.
+- **Client-Side Cross-Tab Coordination**: Handled via the browser **Web Locks API** (`savdocrm_refresh_lock`) and **BroadcastChannel** (`savdocrm_auth_channel`). Only one tab contacts `/refresh`; waiting tabs acquire the lock and reuse the new access token. Refresh tokens are NEVER broadcast and NEVER stored in `localStorage` or `sessionStorage`.

@@ -34,6 +34,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuthCookieService authCookieService;
+    private final com.savdocrm.shared.security.ClientIpResolver clientIpResolver;
 
     @PostMapping("/register")
     @Operation(summary = "Register a new user account with optional initial store")
@@ -149,10 +150,6 @@ public class AuthController {
     }
 
     private String extractClientIp(HttpServletRequest request) {
-        String xfHeader = request.getHeader("X-Forwarded-For");
-        if (xfHeader != null && !xfHeader.isBlank()) {
-            return xfHeader.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolveClientIp(request);
     }
 }

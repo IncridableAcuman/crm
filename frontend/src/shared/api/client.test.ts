@@ -1,18 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import axios from 'axios';
-import { apiClient, executeCoordinatedRefresh } from './client';
+import {
+  apiClient,
+  executeCoordinatedRefresh,
+  SHARED_SESSION_STORAGE_KEY,
+  getSharedSessionState,
+  clearSharedSessionState,
+  authChannel,
+} from './client';
 import { useAuthStore } from '../../features/auth/model/useAuthStore';
 import { queryClient } from './queryClient';
 
-describe('HTTP Client & Concurrent 401 Refresh Queue', () => {
+describe('HTTP Client & Cross-Tab Coordination', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    localStorage.clear();
+    sessionStorage.clear();
     useAuthStore.getState().clearAuth();
     queryClient.clear();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it('should have withCredentials enabled by default for HttpOnly cookie propagation', () => {
@@ -22,14 +33,24 @@ describe('HTTP Client & Concurrent 401 Refresh Queue', () => {
   it('should attach in-memory access token as Authorization Bearer header', async () => {
     useAuthStore.getState().setAccessToken('mock-in-memory-token');
 
-    // Test request interceptor
     const requestHandler = (apiClient.interceptors.request as any).handlers[0].fulfilled;
     const config = await requestHandler({ headers: {} });
 
     expect(config.headers.Authorization).toBe('Bearer mock-in-memory-token');
   });
 
-  it('should clear in-memory auth state and query cache when refresh fails', async () => {
+  it('should reject and clear state if shared state indicates session is unauthenticated (missed broadcast protection)', async () => {
+    useAuthStore.getState().setAccessToken('stale-token');
+    clearSharedSessionState(); // sets state to UNAUTHENTICATED
+
+    const requestHandler = (apiClient.interceptors.request as any).handlers[0].fulfilled;
+
+    await expect(requestHandler({ headers: {} })).rejects.toThrow('Session terminated by another tab');
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it('should clear in-memory auth state, query cache, and shared session state when refresh fails', async () => {
     useAuthStore.getState().setAccessToken('old-expired-token');
     queryClient.setQueryData(['testData'], { key: 'value' });
 
@@ -47,6 +68,7 @@ describe('HTTP Client & Concurrent 401 Refresh Queue', () => {
     expect(useAuthStore.getState().accessToken).toBeNull();
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(queryClient.getQueryData(['testData'])).toBeUndefined();
+    expect(getSharedSessionState()?.state).toBe('UNAUTHENTICATED');
   });
 
   it('should execute coordinated refresh using Web Locks API and update auth state', async () => {
@@ -62,7 +84,6 @@ describe('HTTP Client & Concurrent 401 Refresh Queue', () => {
       },
     });
 
-    // Mock navigator.locks
     const mockRequest = vi.fn().mockImplementation(async (_name, callback) => {
       return callback();
     });
@@ -84,13 +105,13 @@ describe('HTTP Client & Concurrent 401 Refresh Queue', () => {
     expect(token).toBe('new-coordinated-token');
     expect(useAuthStore.getState().accessToken).toBe('new-coordinated-token');
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
+    expect(getSharedSessionState()?.state).toBe('AUTHENTICATED');
   });
 
   it('should reuse refreshed token if another tab refreshed while waiting for Web Lock', async () => {
     const mockPost = vi.spyOn(axios, 'post');
 
-    // Mock navigator.locks simulating Tab B waiting:
-    // while waiting, Tab A finished and updated useAuthStore
+    // Simulate Tab B waiting: Tab A finished and updated useAuthStore
     const mockRequest = vi.fn().mockImplementation(async (_name, callback) => {
       useAuthStore.getState().setAccessToken('token-refreshed-by-tab-a');
       return callback();
@@ -106,8 +127,89 @@ describe('HTTP Client & Concurrent 401 Refresh Queue', () => {
 
     const token = await executeCoordinatedRefresh();
 
-    // Must NOT call /refresh HTTP endpoint because token was already updated!
+    // Must NOT call /refresh HTTP endpoint because token was already updated
     expect(mockPost).not.toHaveBeenCalled();
     expect(token).toBe('token-refreshed-by-tab-a');
+  });
+
+  it('should fallback safely when Web Locks API is unsupported', async () => {
+    vi.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          accessToken: 'fallback-token-no-locks',
+          tokenType: 'Bearer',
+          expiresIn: 900,
+        },
+      },
+    });
+
+    // Remove navigator.locks to simulate unsupported environment
+    Object.defineProperty(globalThis, 'navigator', {
+      value: {},
+      writable: true,
+      configurable: true,
+    });
+
+    const token = await executeCoordinatedRefresh();
+    expect(token).toBe('fallback-token-no-locks');
+    expect(useAuthStore.getState().accessToken).toBe('fallback-token-no-locks');
+  });
+
+  it('should guarantee NO token persistence in localStorage or sessionStorage', async () => {
+    vi.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          accessToken: 'super-secret-jwt-token',
+          refreshToken: null,
+          tokenType: 'Bearer',
+          expiresIn: 900,
+        },
+      },
+    });
+
+    await executeCoordinatedRefresh();
+
+    // Verify localStorage has only session synchronization metadata and NO tokens
+    const rawStorage = localStorage.getItem(SHARED_SESSION_STORAGE_KEY);
+    expect(rawStorage).toBeDefined();
+    expect(rawStorage).not.toContain('super-secret-jwt-token');
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(localStorage.getItem('token')).toBeNull();
+    expect(sessionStorage.getItem('accessToken')).toBeNull();
+    expect(sessionStorage.getItem('refreshToken')).toBeNull();
+  });
+
+  it('should broadcast REFRESH_SUCCESS without ever broadcasting refresh tokens', async () => {
+    const postMessageSpy = vi.fn();
+    if (authChannel) {
+      authChannel.postMessage = postMessageSpy;
+    }
+
+    vi.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          accessToken: 'broadcast-access-token-123',
+          refreshToken: null,
+          tokenType: 'Bearer',
+          expiresIn: 900,
+        },
+      },
+    });
+
+    await executeCoordinatedRefresh();
+
+    if (authChannel) {
+      expect(postMessageSpy).toHaveBeenCalledTimes(1);
+      const firstCall = postMessageSpy.mock.calls[0];
+      expect(firstCall).toBeDefined();
+      const broadcastData = firstCall![0];
+      expect(broadcastData.type).toBe('REFRESH_SUCCESS');
+      expect(broadcastData.accessToken).toBe('broadcast-access-token-123');
+      expect(broadcastData.refreshToken).toBeUndefined(); // NEVER broadcast refresh token!
+    }
   });
 });
