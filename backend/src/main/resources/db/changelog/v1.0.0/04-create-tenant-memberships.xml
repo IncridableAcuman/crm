@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-04-create-tenant-memberships" author="savdocrm-core">
+        <comment>Create tenant_memberships table with unique constraint and composite foreign key readiness</comment>
+        <createTable tableName="tenant_memberships">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_memberships_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="user_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_memberships_user"
+                             references="users(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="status" type="VARCHAR(30)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="tenant_memberships"
+                             columnNames="tenant_id, user_id"
+                             constraintName="uq_memberships_tenant_user"/>
+
+        <addUniqueConstraint tableName="tenant_memberships"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_memberships_tenant_id"/>
+
+        <createIndex tableName="tenant_memberships" indexName="idx_memberships_user">
+            <column name="user_id"/>
+        </createIndex>
+
+        <createIndex tableName="tenant_memberships" indexName="idx_memberships_tenant">
+            <column name="tenant_id"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="tenant_memberships"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

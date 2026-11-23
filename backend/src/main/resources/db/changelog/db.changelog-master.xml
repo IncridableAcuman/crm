@@ -8,5 +8,8 @@
     <include file="db/changelog/v1.0.0/00-baseline.xml"/>
     <include file="db/changelog/v1.0.0/01-create-tenants.xml"/>
     <include file="db/changelog/v1.0.0/02-create-branches.xml"/>
+    <include file="db/changelog/v1.0.0/03-create-users.xml"/>
+    <include file="db/changelog/v1.0.0/04-create-tenant-memberships.xml"/>
+    <include file="db/changelog/v1.0.0/05-create-refresh-tokens.xml"/>
 
 </databaseChangeLog>
