@@ -1,100 +1,62 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useAuthStore } from './useAuthStore';
-import { AuthResponse } from '../../../entities/session/model/types';
+import { TenantMembership } from '../../../entities/user/model/types';
 
-describe('useAuthStore', () => {
+describe('useAuthStore (In-Memory Session Architecture)', () => {
   beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
     useAuthStore.getState().clearAuth();
   });
 
-  it('should initialize with unauthenticated state', () => {
+  it('should initialize with unauthenticated and non-initialized state', () => {
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(false);
     expect(state.isTenantSelected).toBe(false);
-    expect(state.user).toBeNull();
     expect(state.accessToken).toBeNull();
-    expect(state.refreshToken).toBeNull();
     expect(state.activeTenant).toBeNull();
+    expect(state.isInitialized).toBe(true); // clearAuth sets isInitialized to true
   });
 
-  it('should set auth state correctly upon receiving AuthResponse', () => {
-    const mockAuthResponse: AuthResponse = {
-      accessToken: 'mock-access-token',
-      refreshToken: 'mock-refresh-token',
-      tokenType: 'Bearer',
-      expiresIn: 900,
-      user: {
-        id: '11111111-1111-1111-1111-111111111111',
-        email: 'test@savdocrm.com',
-        username: 'testuser',
-        firstName: 'Test',
-        lastName: 'User',
-      },
-      activeTenant: {
-        tenantId: '22222222-2222-2222-2222-222222222222',
-        tenantName: 'Test Store',
-        tenantCode: 'TESTSTORE',
-        membershipStatus: 'ACTIVE',
-        current: true,
-      },
-      availableTenants: [
-        {
-          tenantId: '22222222-2222-2222-2222-222222222222',
-          tenantName: 'Test Store',
-          tenantCode: 'TESTSTORE',
-          membershipStatus: 'ACTIVE',
-          current: true,
-        },
-      ],
-    };
-
-    useAuthStore.getState().setAuth(mockAuthResponse);
+  it('should store access token in memory only and not in localStorage', () => {
+    useAuthStore.getState().setAccessToken('in-memory-jwt-token-xyz');
 
     const state = useAuthStore.getState();
     expect(state.isAuthenticated).toBe(true);
-    expect(state.isTenantSelected).toBe(true);
-    expect(state.accessToken).toBe('mock-access-token');
-    expect(state.user?.email).toBe('test@savdocrm.com');
-    expect(state.activeTenant?.tenantName).toBe('Test Store');
+    expect(state.accessToken).toBe('in-memory-jwt-token-xyz');
+
+    // Security Verification: Neither access token nor refresh token is in localStorage
+    expect(localStorage.getItem('savdocrm_auth')).toBeNull();
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(sessionStorage.getItem('refreshToken')).toBeNull();
   });
 
-  it('should switch active tenant correctly', () => {
-    const initialTenant = {
-      tenantId: 't1',
-      tenantName: 'Store 1',
-      tenantCode: 'S1',
-      membershipStatus: 'ACTIVE' as const,
+  it('should set active tenant correctly', () => {
+    const store: TenantMembership = {
+      tenantId: '11111111-2222-3333-4444-555555555555',
+      tenantName: 'Downtown Supermarket',
+      tenantCode: 'DOWNTOWN',
+      membershipStatus: 'ACTIVE',
       current: true,
     };
-    const secondTenant = {
-      tenantId: 't2',
-      tenantName: 'Store 2',
-      tenantCode: 'S2',
-      membershipStatus: 'ACTIVE' as const,
-      current: false,
-    };
 
-    useAuthStore.setState({
-      availableTenants: [initialTenant, secondTenant],
-      activeTenant: initialTenant,
-      isAuthenticated: true,
-    });
-
-    useAuthStore.getState().setActiveTenant(secondTenant, 'new-access-token', 'new-refresh-token');
+    useAuthStore.getState().setActiveTenant(store);
 
     const state = useAuthStore.getState();
-    expect(state.activeTenant?.tenantId).toBe('t2');
-    expect(state.accessToken).toBe('new-access-token');
     expect(state.isTenantSelected).toBe(true);
-    expect(state.availableTenants.find((t) => t.tenantId === 't2')?.current).toBe(true);
-    expect(state.availableTenants.find((t) => t.tenantId === 't1')?.current).toBe(false);
+    expect(state.activeTenant?.tenantName).toBe('Downtown Supermarket');
+    expect(state.activeTenant?.tenantId).toBe('11111111-2222-3333-4444-555555555555');
   });
 
   it('should reset all state on clearAuth', () => {
-    useAuthStore.setState({
-      accessToken: 'token',
-      isAuthenticated: true,
-      isTenantSelected: true,
+    useAuthStore.getState().setAccessToken('token-123');
+    useAuthStore.getState().setActiveTenant({
+      tenantId: 'tenant-1',
+      tenantName: 'Store 1',
+      tenantCode: 'S1',
+      membershipStatus: 'ACTIVE',
+      current: true,
     });
 
     useAuthStore.getState().clearAuth();
@@ -103,5 +65,6 @@ describe('useAuthStore', () => {
     expect(state.isAuthenticated).toBe(false);
     expect(state.isTenantSelected).toBe(false);
     expect(state.accessToken).toBeNull();
+    expect(state.activeTenant).toBeNull();
   });
 });

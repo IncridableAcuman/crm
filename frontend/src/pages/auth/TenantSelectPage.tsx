@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../features/auth/model/useAuthStore';
+import { useCurrentUser } from '../../features/auth/model/authQueries';
 import { authApi } from '../../features/auth/api/authApi';
+import { queryClient } from '../../shared/api/queryClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../shared/ui/card';
 import { Button } from '../../shared/ui/button';
 import { Store, CheckCircle, ArrowRight, LogOut, Loader2, AlertCircle } from 'lucide-react';
@@ -9,7 +11,12 @@ import { TenantMembership } from '../../entities/user/model/types';
 
 export const TenantSelectPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user, availableTenants, activeTenant, setActiveTenant, clearAuth, refreshToken } = useAuthStore();
+  const { activeTenant, setAccessToken, setActiveTenant, clearAuth } = useAuthStore();
+  const { data: authData, isLoading: isUserLoading } = useCurrentUser();
+
+  const user = authData?.user;
+  const availableTenants = authData?.availableTenants || [];
+
   const [selectedId, setSelectedId] = useState<string | null>(activeTenant?.tenantId || null);
   const [loadingTenantId, setLoadingTenantId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +28,12 @@ export const TenantSelectPage: React.FC = () => {
 
     try {
       const response = await authApi.selectTenant({ tenantId: tenant.tenantId });
-      setActiveTenant(tenant, response.accessToken, response.refreshToken);
+      setAccessToken(response.accessToken);
+      setActiveTenant(tenant);
+
+      // Clear all tenant-specific cached queries so previous store data never leaks
+      queryClient.clear();
+
       navigate('/');
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.response?.data?.message || 'Failed to switch to store';
@@ -33,11 +45,10 @@ export const TenantSelectPage: React.FC = () => {
 
   const handleLogout = async () => {
     try {
-      if (refreshToken) {
-        await authApi.logout(refreshToken);
-      }
+      await authApi.logout();
     } finally {
       clearAuth();
+      queryClient.clear();
       navigate('/login');
     }
   };
@@ -54,7 +65,7 @@ export const TenantSelectPage: React.FC = () => {
               <div>
                 <CardTitle className="text-xl font-bold text-slate-900">Select Store</CardTitle>
                 <CardDescription className="text-xs text-slate-500">
-                  Logged in as {user?.firstName} {user?.lastName} ({user?.email})
+                  {user ? `Logged in as ${user.firstName} ${user.lastName} (${user.email})` : 'Loading profile...'}
                 </CardDescription>
               </div>
             </div>
@@ -83,7 +94,11 @@ export const TenantSelectPage: React.FC = () => {
           <div className="space-y-2">
             <p className="text-sm font-medium text-slate-700">Choose a store to manage:</p>
 
-            {availableTenants.length === 0 ? (
+            {isUserLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+              </div>
+            ) : availableTenants.length === 0 ? (
               <div className="text-center py-8 rounded-lg border border-dashed border-slate-300 p-6">
                 <Store className="mx-auto h-8 w-8 text-slate-400 mb-2" />
                 <p className="text-sm font-medium text-slate-700">No stores found</p>

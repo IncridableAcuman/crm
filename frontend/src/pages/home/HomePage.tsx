@@ -2,7 +2,9 @@ import React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../shared/ui/card';
 import { Button } from '../../shared/ui/button';
 import { useAuthStore } from '../../features/auth/model/useAuthStore';
+import { useCurrentUser } from '../../features/auth/model/authQueries';
 import { authApi } from '../../features/auth/api/authApi';
+import { queryClient } from '../../shared/api/queryClient';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -18,15 +20,16 @@ import {
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { user, activeTenant, refreshToken, clearAuth } = useAuthStore();
+  const { activeTenant, clearAuth } = useAuthStore();
+  const { data: authData } = useCurrentUser();
+  const user = authData?.user;
 
   const handleLogout = async () => {
     try {
-      if (refreshToken) {
-        await authApi.logout(refreshToken);
-      }
+      await authApi.logout();
     } finally {
       clearAuth();
+      queryClient.clear();
       navigate('/login');
     }
   };

@@ -5,6 +5,7 @@ import * as z from 'zod';
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/authApi';
 import { useAuthStore } from '../model/useAuthStore';
+import { queryClient } from '../../../shared/api/queryClient';
 import { Button } from '../../../shared/ui/button';
 import { Input } from '../../../shared/ui/input';
 import { Label } from '../../../shared/ui/label';
@@ -28,7 +29,7 @@ type RegisterFormData = z.infer<typeof registerSchema>;
 
 export const RegisterForm: React.FC = () => {
   const navigate = useNavigate();
-  const setAuth = useAuthStore((state) => state.setAuth);
+  const { setAccessToken, setActiveTenant } = useAuthStore();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const {
@@ -52,7 +53,10 @@ export const RegisterForm: React.FC = () => {
     setErrorMessage(null);
     try {
       const authResponse = await authApi.register(data);
-      setAuth(authResponse);
+      setAccessToken(authResponse.accessToken);
+      setActiveTenant(authResponse.activeTenant || null);
+
+      await queryClient.invalidateQueries({ queryKey: ['auth'] });
 
       if (authResponse.activeTenant) {
         navigate('/');

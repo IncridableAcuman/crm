@@ -1,6 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../../features/auth/model/useAuthStore';
 import { ApiResponse, AuthResponse } from '../../entities/session/model/types';
+import { queryClient } from './queryClient';
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api/v1',
@@ -8,9 +9,10 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 15000,
+  withCredentials: true,
 });
 
-// Request Interceptor: Attach JWT Bearer token
+// Request Interceptor: Attach in-memory JWT Bearer token
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = useAuthStore.getState().accessToken;
@@ -40,7 +42,7 @@ const processQueue = (error: unknown, token: string | null = null) => {
   failedQueue = [];
 };
 
-// Response Interceptor: 401 refresh token rotation
+// Response Interceptor: 401 refresh token rotation via HttpOnly cookie
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -54,7 +56,8 @@ apiClient.interceptors.response.use(
     if (
       originalRequest.url?.includes('/auth/login') ||
       originalRequest.url?.includes('/auth/register') ||
-      originalRequest.url?.includes('/auth/refresh')
+      originalRequest.url?.includes('/auth/refresh') ||
+      originalRequest.url?.includes('/auth/logout')
     ) {
       return Promise.reject(error);
     }
@@ -76,22 +79,18 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const currentRefreshToken = useAuthStore.getState().refreshToken;
-
-      if (!currentRefreshToken) {
-        useAuthStore.getState().clearAuth();
-        isRefreshing = false;
-        return Promise.reject(error);
-      }
-
       try {
         const refreshResponse = await axios.post<ApiResponse<AuthResponse>>(
           `${apiClient.defaults.baseURL}/auth/refresh`,
-          { refreshToken: currentRefreshToken }
+          {},
+          { withCredentials: true }
         );
 
         const newAuth = refreshResponse.data.data;
-        useAuthStore.getState().setTokens(newAuth.accessToken, newAuth.refreshToken);
+        useAuthStore.getState().setAccessToken(newAuth.accessToken);
+        if (newAuth.activeTenant) {
+          useAuthStore.getState().setActiveTenant(newAuth.activeTenant);
+        }
 
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${newAuth.accessToken}`;
@@ -102,6 +101,7 @@ apiClient.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         useAuthStore.getState().clearAuth();
+        queryClient.clear();
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
