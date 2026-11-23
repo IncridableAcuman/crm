@@ -168,3 +168,22 @@ If an authenticated user attempts to pass another branch's ID in `OpenShiftComma
    - Passwords hashed using **BCrypt (work factor 12)**.
 5. **Cross-Site Request Forgery (CSRF)**:
    - API is stateless; Bearer token authorization headers cannot be forged via ambient browser cross-origin requests.
+
+---
+
+## 6. Implementation Status: Milestone 02 vs. Planned Milestones
+
+### Implemented in Milestone 02:
+- **Fail-Closed Execution**: `TenantContextHolder` strictly rejects execution without a trusted context.
+- **Context Lifecycle**: Guaranteed `ThreadLocal` cleanup prevents pooled thread contamination.
+- **Asynchronous Safety**: `TenantContextTaskDecorator` safely propagates tenant context to task executor worker threads.
+- **Zero Client Trust**: No client-provided `X-Tenant-Id` header is accepted or processed.
+- **Database-Level Ownership Enforcement**: Composite unique constraints and foreign keys physically block cross-tenant assignment in PostgreSQL.
+
+### Planned for Milestone 03:
+- User registration, password hashing (BCrypt work factor 12), and credential verification.
+- Stateless dual-token JWT architecture (access tokens + refresh rotation).
+- Extraction of trusted `tenantId` from cryptographically signed JWT claims to populate `TenantContextHolder`.
+
+### Planned for Milestone 04:
+- 4-tier scoped role assignments and `BranchSecurityEvaluator`.

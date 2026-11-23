@@ -9,13 +9,13 @@ This guide covers local development setup, prerequisites, execution commands, an
 - **Java**: OpenJDK 21 LTS (`java -version`)
 - **Node.js**: Node.js 20+ / 22+ (`node -v`)
 - **Docker**: Docker Engine & Docker Compose (`docker compose version`)
-- **Gradle**: Managed via included Gradle Wrapper 9.8.2 (`./gradlew`)
+- **Gradle**: Managed via included Gradle Wrapper 9.9.1 (`./gradlew`)
 
 ---
 
 ## 2. Infrastructure Setup (Local PostgreSQL)
 
-The project includes a `docker-compose.yml` preconfigured for PostgreSQL 16:
+The project includes a `docker-compose.yml` preconfigured for PostgreSQL 16 on port 5434 (to avoid conflicts with standard host PostgreSQL):
 
 ```bash
 # Start PostgreSQL container in background
@@ -25,7 +25,7 @@ docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml ps
 ```
 
-Configuration defaults are specified in [`.env.example`](file:///home/izzatbek/Desktop/crm/.env.example). Copy to `.env` if custom credentials are required.
+Configuration defaults are specified in [`.env.example`](file:///home/izzatbek/Desktop/crm/.env.example). Copy to `.env` if custom credentials or port mappings are required.
 
 ---
 

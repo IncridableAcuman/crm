@@ -161,3 +161,17 @@ This document records the key architectural decisions, rationale, context, and t
 - **Consequences**:
   - *Positive*: Clean unidirectional dependencies; zero circular imports; independent auditable ledgers.
   - *Negative*: Requires Sales and Purchases to coordinate calls across both domain services.
+
+---
+
+## ADR-016: Multi-Tenancy Isolation Contract and Authentication Boundary Separation
+- **Status**: Accepted
+- **Context**: Milestone 02 establishes the multi-tenancy foundation prior to authentication (scheduled for Milestone 03). Naive systems often introduce temporary mock authentication or trust client-supplied headers (e.g., `X-Tenant-Id`), creating severe security and architectural risks.
+- **Decision**:
+  1. Fail-closed: Operations requiring tenant context immediately abort (`TenantContextMissingException`) if no trusted context is established.
+  2. Zero header trust: Client-supplied tenant headers are not accepted or evaluated as proof of membership.
+  3. Database and repository enforcement: Enforce composite unique constraints `(tenant_id, code)` and `(tenant_id, id)` and composite foreign keys at the PostgreSQL level.
+  4. Authentication deferral: The extraction of trusted tenant identifiers is formally bound to verified JWT claims in Milestone 03.
+- **Consequences**:
+  - *Positive*: Prevents architectural contamination from temporary mock auth; guarantees mathematical isolation in PostgreSQL; clean integration interface for Milestone 03.
+  - *Negative*: Unauthenticated clients cannot access tenant-scoped data until Milestone 03 authentication is implemented.

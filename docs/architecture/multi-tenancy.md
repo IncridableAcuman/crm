@@ -277,8 +277,35 @@ A single user account (`users` table) can hold memberships across multiple retai
 
 ## 6. Automated Multi-Tenancy Isolation Test Suite
 
-To prove tenant isolation mathematically, automated integration tests run in CI using **Testcontainers**:
-1. **Cross-Tenant Read Test**: Seed Entity in Tenant A. Set `TenantContext` to Tenant B. Assert query returns `Optional.empty()`.
-2. **Cross-Tenant Write Test**: Attempt to mutate Tenant A entity while authenticated as Tenant B. Assert `404 Not Found` or `TenantAccessDeniedException`.
-3. **Thread Contamination Test**: Execute 1,000 parallel requests across alternating tenant IDs on a small thread pool. Assert 100% of responses contain zero cross-tenant contamination.
-4. **Missing Context Test**: Execute query with `TenantContextHolder.clear()`. Assert `TenantContextMissingException` is thrown.
+To prove tenant isolation mathematically, automated integration tests run in CI using **Testcontainers PostgreSQL 16**:
+1. **Cross-Tenant Read Test**: Seed Branch in Tenant A. Set `TenantContext` to Tenant B. Assert query returns `Optional.empty()`.
+2. **Cross-Tenant Write / Deletion Test**: Attempt to delete Tenant B branch while authenticated as Tenant A. Assert Branch B remains untouched.
+3. **Missing Context Test (Fail-Closed)**: Execute query with `TenantContextHolder.clear()`. Assert `TenantContextMissingException` is thrown.
+4. **Thread Contamination Test**: Execute parallel worker threads and task decorators. Assert zero cross-thread context bleeding.
+5. **Database Constraint Test**: Unique composite constraint `(tenant_id, code)` prevents duplicate branch codes in Tenant A, while allowing different tenants to share the same code.
+
+---
+
+## 7. Implemented Milestone 02 Architecture vs. Planned Behavior
+
+### Implemented Behavior (Milestone 02):
+- **Core Domain Entities**: `Tenant` (with `TenantStatus`, `currencyCode`, `timezone`, audit fields, `@Version`) and `Branch` (extending `BaseTenantEntity` with `(tenant_id, code)` uniqueness and optimistic locking).
+- **Fail-Closed Context**: `TenantContextHolder` throws `TenantContextMissingException` if an unauthenticated or unscoped call is made.
+- **Execution Template**: `TenantExecutionTemplate.executeAsTenant(tenantId, action)` safely wraps background/system execution with guaranteed `finally` cleanup and nested context restoration.
+- **Async Propagation**: `TenantContextTaskDecorator` implements Spring's `TaskDecorator` to copy `TenantContext` to worker threads and clean up upon termination.
+- **Data Access Contract**: `TenantAwareRepository` contract provides explicit `findByTenantIdAndId`, `findAllByTenantId`, `existsByTenantIdAndId`, `deleteByTenantIdAndId`, and contextual helper methods.
+- **Liquibase Migrations**: `v1.0.0/01-create-tenants.xml` and `v1.0.0/02-create-branches.xml` with foreign key `fk_branches_tenant`, composite unique constraints `uq_branches_tenant_code` and `uq_branches_tenant_id`, and index `idx_branches_tenant`.
+
+---
+
+## 8. Authentication Boundary & Milestone 03 Integration Contract
+
+To avoid premature abstractions and preserve zero-trust security:
+- **No Temporary Authentication**: No mock users or unverified headers (e.g. `X-Tenant-Id`) are accepted in Milestone 02.
+- **No Unauthenticated Exposure**: Tenant data is not exposed over unauthenticated REST endpoints.
+- **Integration Contract for Milestone 03**:
+  1. User authenticates via `/api/v1/auth/login` (email + password).
+  2. Identity module verifies active `TenantMembership` for the user.
+  3. Server issues signed JWT containing verified `tenantId` and `membershipId`.
+  4. Incoming API requests are intercepted by `TenantSecurityFilter` (Milestone 03), which parses the cryptographically verified JWT claims, sets `TenantContextHolder.setContext(...)`, and executes the request.
+  5. If an unauthenticated request reaches tenant-scoped code, it fails closed immediately (`TenantContextMissingException`).

@@ -492,16 +492,24 @@ CREATE TABLE supplier_debt_records (
 
 ---
 
-## 5. Liquibase Migration Standards
+## 5. Liquibase Migration Implementation & Standards
 
-All database schema evolutions must be tracked in Liquibase changelogs:
+All database schema evolutions are versioned via Liquibase:
 - Master file: `backend/src/main/resources/db/changelog/db.changelog-master.xml`
-- Modular domain files under `v1.0.0/`:
-  - `01-create-tenancy-schema.xml`
-  - `02-create-identity-schema.xml`
-  - `03-create-catalog-schema.xml`
-  - `04-create-inventory-schema.xml`
-  - `05-create-sales-idempotency-schema.xml`
-  - `06-create-parties-finance-schema.xml`
-  - `07-create-audit-schema.xml`
-- Every migration changeset must define explicit `<rollback>` instructions.
+
+### Implemented Changesets:
+1. `v1.0.0/00-baseline.xml` (Milestone 01):
+   - Table `system_metadata`: Tracks system initialization and core platform metadata.
+2. `v1.0.0/01-create-tenants.xml` (Milestone 02):
+   - Table `tenants`: Primary entity for multi-tenancy with `code` unique index, currency, timezone, status, and audit fields.
+3. `v1.0.0/02-create-branches.xml` (Milestone 02):
+   - Table `branches`: Branch network scoped to tenant with `fk_branches_tenant`, composite unique constraints `uq_branches_tenant_code` and `uq_branches_tenant_id`, and index `idx_branches_tenant`.
+
+### Planned Changesets (Subsequent Milestones):
+- `v1.0.0/03-create-identity-schema.xml` (Milestone 03: Users, Memberships, Refresh Tokens)
+- `v1.0.0/04-create-rbac-schema.xml` (Milestone 04: Roles, Permissions, Scoped Assignments)
+- `v1.0.0/05-create-catalog-schema.xml` (Milestone 05: Categories, Units, Products, Variants, Barcodes)
+- `v1.0.0/06-create-inventory-schema.xml` (Milestone 06: Stocks, Transactions, Warehouses)
+- `v1.0.0/07-create-sales-schema.xml` (Milestone 07: POS Sessions, Sales, Items, Idempotency)
+- `v1.0.0/08-create-parties-finance-schema.xml` (Milestones 08 & 09: Customers, Suppliers, Debts, Accounts)
+- `v1.0.0/09-create-audit-schema.xml` (Milestone 10: Audit Log)
