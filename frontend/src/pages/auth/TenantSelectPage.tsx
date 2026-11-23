@@ -27,11 +27,14 @@ export const TenantSelectPage: React.FC = () => {
     setError(null);
 
     try {
+      // 1. Cancel in-flight queries from the previous tenant context
+      await queryClient.cancelQueries();
+
       const response = await authApi.selectTenant({ tenantId: tenant.tenantId });
       setAccessToken(response.accessToken);
       setActiveTenant(tenant);
 
-      // Clear all tenant-specific cached queries so previous store data never leaks
+      // 2. Clear all cached queries so previous store data never leaks
       queryClient.clear();
 
       navigate('/');
@@ -47,6 +50,7 @@ export const TenantSelectPage: React.FC = () => {
     try {
       await authApi.logout();
     } finally {
+      await queryClient.cancelQueries();
       clearAuth();
       queryClient.clear();
       navigate('/login');

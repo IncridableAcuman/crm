@@ -109,8 +109,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 return;
                             }
 
-                            if (membershipId != null && !membership.getId().equals(membershipId)) {
-                                sendForbiddenError(request, response, "Tenant membership claim mismatch.");
+                            if (membershipId == null || !membership.getId().equals(membershipId)) {
+                                sendForbiddenError(request, response, "Tenant membership claim missing or mismatch.");
                                 return;
                             }
 

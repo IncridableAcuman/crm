@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary
 
-SAVDOCRM Milestone 03 delivers a production-grade, multi-tenant authentication and session management subsystem for retail store management. It implements a **Dual-Phase JWT Authentication Model** with cryptographically secure refresh token rotation, token reuse detection with concurrency grace handling, server-side tenant isolation enforcement, and an in-memory frontend session architecture powered by HttpOnly cookies and TanStack Query.
+SAVDOCRM Milestone 03 delivers a production-grade, multi-tenant authentication and session management subsystem for retail store management. It implements a **Dual-Phase JWT Authentication Model** with cryptographically secure refresh token rotation, authenticated encryption for successor recovery during grace windows, token reuse compromise quarantine, server-side tenant isolation enforcement, and an in-memory frontend session architecture powered by HttpOnly cookies and TanStack Query.
 
 ---
 
@@ -39,10 +39,24 @@ Links a global `User` to a specific `Tenant`.
   - `uq_memberships_tenant_id`: Composite candidate key for tenant-partitioned references.
 
 ### 2.3 RefreshToken
-Opaque cryptographically secure session record with token family tracking.
+Opaque cryptographically secure session record with token family tracking and encrypted successor token storage.
 - **Table**: `refresh_tokens`
-- **Fields**: `id` (UUIDv4), `user_id` (UUIDv4 FK), `token_hash` (CHAR(64) SHA-256), `token_family` (UUIDv4), `tenant_id` (UUIDv4 nullable), `revoked` (boolean), `revoked_at`, `revoked_reason`, `expires_at`, `created_at`, `created_ip`, `user_agent`.
-- **Security**: Raw refresh tokens (48 random bytes, base64url encoded) are never persisted in the database; only their SHA-256 hashes are stored.
+- **Fields**:
+  - `id` (UUIDv4)
+  - `user_id` (UUIDv4 FK)
+  - `token_hash` (VARCHAR(64) SHA-256)
+  - `token_family` (UUIDv4)
+  - `tenant_id` (UUIDv4 nullable)
+  - `revoked` (boolean)
+  - `revoked_at` (TIMESTAMP WITH TIME ZONE)
+  - `revoked_reason` (VARCHAR(100))
+  - `successor_token_encrypted` (TEXT, AES-256-GCM encrypted payload)
+  - `successor_token_hash` (VARCHAR(64) SHA-256 of successor)
+  - `expires_at` (TIMESTAMP WITH TIME ZONE)
+  - `created_at` (TIMESTAMP WITH TIME ZONE)
+  - `created_ip` (VARCHAR(50))
+  - `user_agent` (TEXT)
+- **Security**: Raw refresh tokens (32 secure random bytes, Base64URL encoded) are never persisted in plaintext. The token itself is stored as a SHA-256 hash. When rotated, its successor is encrypted using AES-256-GCM with a server-derived key for short-lived grace-window idempotent recovery.
 
 ---
 
@@ -73,112 +87,128 @@ jwt:
 
 ---
 
-## 4. Dual-Phase Authentication Flow
+## 4. Deployment Topologies, Cookie SameSite & CSRF Strategy
 
-SAVDOCRM separates identity verification from tenant context activation to prevent privilege elevation and cross-store data leakage:
+### Topology A: Same-Site Cross-Origin Deployment
+- **Architecture**: Frontend at `https://app.savdocrm.com` and backend API at `https://api.savdocrm.com`. Both share the registrable domain `savdocrm.com` (Same-Site).
+- **Cookie Policy**: `SameSite=Lax; Secure; HttpOnly; Path=/api/v1/auth`.
+- **CSRF Defense**: Modern browsers do not attach `SameSite=Lax` cookies to cross-site `POST` requests. In addition, the backend enforces explicit `Origin` validation against the configured `cors.allowed-origins`.
+
+### Topology B: Cross-Site Deployment
+- **Architecture**: Frontend at `https://store-app.com` and backend at `https://savdocrm-api.com` (different registrable domains).
+- **Cookie Policy**: Requires `SameSite=None; Secure; HttpOnly; Path=/api/v1/auth`.
+- **CSRF Defense**:
+  1. **Strict Origin Validation**: `AuthCookieService.validateOriginForCookieAuth` rejects any cookie-bearing request whose `Origin` does not strictly match `cors.allowed-origins`.
+  2. **Preflight Enforcement**: Requests carry custom headers or JSON payloads that mandate CORS preflight checks (`OPTIONS`), verified against explicit origin whitelists without wildcards.
+  3. **Path Scoping**: Cookies are restricted exclusively to `/api/v1/auth`, ensuring business API endpoints are protected strictly by in-memory Bearer tokens.
+
+---
+
+## 5. Refresh Token Grace Window & Cryptographic Successor Recovery
+
+```
+Client Request with Old Token T0
+           │
+           ▼
+[PESSIMISTIC_WRITE Row Lock on T0] (PostgreSQL SELECT ... FOR UPDATE)
+           │
+           ├─► Is T0 valid (not revoked, not expired)?
+           │      └─► Proceed with normal rotation:
+           │            1. Generate new raw T1.
+           │            2. Save T1 (hash = H(T1)).
+           │            3. Encrypt raw T1 via AES-256-GCM.
+           │            4. Update T0: revoked=true, reason="Rotated",
+           │               successor_token_encrypted=enc(T1), successor_token_hash=H(T1).
+           │            5. Deliver T1 in HttpOnly Set-Cookie + fresh access token.
+           │
+           └─► Is T0 revoked?
+                  │
+                  ├─► Reason == "Rotated" AND elapsed <= 10 seconds?
+                  │      │
+                  │      └─► (CONCURRENCY GRACE WINDOW):
+                  │            1. Decrypt raw T1 from T0.successor_token_encrypted.
+                  │            2. Verify H(T1) == T0.successor_token_hash.
+                  │            3. Verify T1 exists, is valid, and belongs to same family.
+                  │            4. Return IDEMPOTENT result:
+                  │               Deliver T1 in HttpOnly Set-Cookie + fresh access token.
+                  │               **NO NEW REFRESH TOKEN IS MINTED.**
+                  │
+                  └─► Reason != "Rotated" OR elapsed > 10 seconds?
+                         │
+                         └─► (TOKEN REUSE DETECTED / ATTACK):
+                               1. Quarantine: revoke entire token family in DB.
+                               2. Throw 401 Unauthorized ("Token reuse detected").
+                               3. Terminate all sessions in the family.
+```
+
+### Security Properties Guaranteed:
+1. **No Token Forking / Replay Inflation**: A replayed old token can never produce a new or branched refresh token. It only reproduces the exact successor $T_1$ idempotently.
+2. **Security at Rest**: Raw tokens are never stored in plaintext. $T_1$'s active record contains only its SHA-256 hash. $T_0$'s record contains $T_1$ encrypted using authenticated AES-256-GCM with a server-derived secret key.
+3. **Serialized Database Locking**: PostgreSQL row locking ensures that parallel threads for the same token execute sequentially without race conditions.
+4. **Immediate Family Quarantine**: When an old token is presented after the 10-second grace window, the entire family is revoked, neutralizing compromised tokens.
+
+---
+
+## 6. Global Token vs Tenant-Scoped Token Architecture
+
+SAVDOCRM strictly distinguishes between global identity and active tenant authorization:
+
+| Dimension | Global Login Token | Tenant-Scoped Token |
+|---|---|---|
+| **Endpoint Source** | `POST /api/v1/auth/login` | `POST /api/v1/auth/select-tenant` or `POST /api/v1/auth/register` |
+| **Token Claims** | `userId`, `email`, `sub` (`tenantId` and `membershipId` are **null**) | `userId`, `email`, `sub`, `tenantId`, `membershipId` |
+| **Permissions** | Profile lookup (`GET /api/v1/auth/me`), store selection (`POST /select-tenant`) | Full store management operations (`/api/v1/branches`, etc.) |
+| **Tenancy Enforcement** | `TenantContextHolder` is **NOT** bound | `TenantContextHolder.setContext(TenantContext.of(tenantId))` |
+| **Missing Context** | Accessing business APIs fails closed with `403 Forbidden` (`Tenant Context Missing`) | Executes safely within isolated tenant scope |
+| **Client Headers** | Client headers like `X-Tenant-Id` are **never trusted** | Context is strictly derived from the cryptographically verified JWT |
+
+---
+
+## 7. Tenant Switching & Query Cache Isolation
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Store Associate / Owner
-    participant Client as Frontend (React 19)
-    participant Auth as AuthController / AuthService
-    participant DB as PostgreSQL 16
-    participant Filter as JwtAuthenticationFilter
-
-    Note over User,Client: Phase 1: Global Identity Authentication
-    User->>Client: Enters credentials (email/username + password)
-    Client->>Auth: POST /api/v1/auth/login
-    Auth->>DB: Query user by email (case-insensitive) or username
-    DB-->>Auth: User record (passwordHash, status)
-    Auth->>Auth: Verify password (BCrypt cost 12) & check ACTIVE status
-    Auth->>DB: Query user's available tenant memberships
-    Auth->>Auth: Mint Global Access Token (userId, email, no tenantId)
-    Auth->>DB: Persist SHA-256 hashed RefreshToken (new tokenFamily)
-    Auth-->>Client: Returns 200 OK + Set-Cookie (HttpOnly savdocrm_refresh_token)
-    Note over Client: Stores accessToken strictly in memory (Zustand)
-
-    Note over User,Client: Phase 2: Active Store Selection
-    Client->>User: Renders Store Selector (/select-tenant)
-    User->>Client: Selects store (tenantId)
-    Client->>Auth: POST /api/v1/auth/select-tenant (Bearer GlobalToken)
-    Auth->>DB: Verify membership ACTIVE & Tenant ACTIVE
-    Auth->>Auth: Mint Tenant-Scoped Access Token (userId, email, tenantId, membershipId)
-    Auth->>DB: Persist new RefreshToken linked to tenantId
-    Auth-->>Client: Returns 200 OK (Tenant Access Token in JSON) + Set-Cookie (Rotated HttpOnly Cookie)
-    Note over Client: Clears queryClient cache & stores new in-memory accessToken
-
-    Note over Client,Filter: Request Execution with Tenant Scope
-    Client->>Filter: GET /api/v1/branches (Bearer TenantToken)
-    Filter->>Filter: Validate JWT signature & claims
-    Filter->>DB: Live check: User ACTIVE, Tenant ACTIVE, Membership ACTIVE
-    Filter->>Filter: TenantContextHolder.setContext(TenantContext.of(tenantId))
-    Filter-->>Client: Protected business response (strictly filtered to active tenant)
-    Filter->>Filter: finally { TenantContextHolder.clear(); }
+flowchart TD
+    A["User Selects Store<br/>(POST /api/v1/auth/select-tenant)"] --> B["Frontend: cancelQueries()<br/>Abort in-flight requests for old tenant"]
+    B --> C["Backend verifies active User, Tenant & Membership"]
+    C --> D["Backend returns new tenant-scoped access token + rotated cookie"]
+    D --> E["Frontend: queryClient.clear()<br/>Purge entire cache of previous store data"]
+    E --> F["Update Zustand in-memory activeTenant & accessToken"]
+    F --> G["Navigate to Dashboard / Fetch fresh store data"]
 ```
 
 ---
 
-## 5. Refresh Token Security & Concurrency Control
+## 8. Logout & Session Revocation
 
-### 5.1 Row-Level Locking (`PESSIMISTIC_WRITE`)
-When `/api/v1/auth/refresh` is called:
-1. `RefreshTokenRepository.findByTokenHashWithLock(tokenHash)` acquires a PostgreSQL row-level lock (`SELECT ... FOR UPDATE`).
-2. Concurrent requests on the same session are serialized, eliminating race conditions between simultaneous network calls (e.g. multiple tabs or simultaneous 401s).
-
-### 5.2 Concurrency Grace Window (OAuth 2.0 Security BCP)
-- When a refresh token is rotated, it is marked `revoked = true` with reason `"Rotated"` and timestamp `revoked_at`.
-- If a truly concurrent request presents that same token within **10 seconds** of rotation:
-  - It identifies that `revokedReason == "Rotated"` and `revokedAt > now - 10s`.
-  - It retrieves the latest valid active session in that token family and returns the valid token without revoking the family.
-- If a revoked token is presented **outside the 10-second grace window** (or revoked for any other reason):
-  - **Automated Compromise Quarantine**: The entire token family is immediately revoked in PostgreSQL (`UPDATE refresh_tokens SET revoked = true, revoked_reason = 'Token reuse detected' WHERE token_family = :family`).
-  - Returns RFC 7807 401 Unauthorized (`"Invalid refresh token: token reuse detected."`).
-  - All attacker and user sessions within that family are terminated.
+When `POST /api/v1/auth/logout` is called:
+1. The backend extracts the refresh token from the HttpOnly cookie.
+2. `AuthService.logout` queries the token family and executes:
+   ```sql
+   UPDATE refresh_tokens SET revoked = true, revoked_at = now(), revoked_reason = 'User logout' WHERE token_family = :family;
+   ```
+   **The entire token family is revoked**, preventing any token from that session from ever restoring access.
+3. The response returns `Set-Cookie: savdocrm_refresh_token=; Path=/api/v1/auth; Max-Age=0; HttpOnly; SameSite=...`.
+4. Logout is publicly accessible and succeeds even if the caller's access token is expired.
+5. On the frontend, `queryClient.cancelQueries()`, `useAuthStore.clearAuth()`, and `queryClient.clear()` purge all client-side state.
 
 ---
 
-## 6. Tenant Switching & Query Cache Isolation
+## 9. Test Verification Summary
 
-When a user switches stores:
-1. Client calls `POST /api/v1/auth/select-tenant` with `tenantId`.
-2. Backend verifies user membership and tenant status, emitting a new tenant-scoped access token and updated refresh cookie.
-3. Client executes `queryClient.clear()`:
-   - **Zero Cross-Tenant Leakage**: All cached queries (branches, products, orders, customers, financial balances) from the previous tenant are immediately purged from memory.
-   - TanStack Query refetches clean data for the newly selected store.
-4. Zustand store updates in-memory `accessToken` and `activeTenant` metadata.
-
----
-
-## 7. Request Authentication & Live Verification
-
-[`JwtAuthenticationFilter`](file:///home/izzatbek/Desktop/crm/backend/src/main/java/com/savdocrm/shared/security/JwtAuthenticationFilter.java) validates on **every request**:
-1. **JWT Signature & Expiration**: HMAC-SHA256 signature verification with JJWT.
-2. **User Status**: Live lookup in `UserRepository` confirming `user.isActive() == true`.
-3. **Tenant Status**: If tenant-scoped, live lookup confirming `tenant.getStatus() == TenantStatus.ACTIVE`.
-4. **Membership Status**: Live lookup confirming `membership.getStatus() == MembershipStatus.ACTIVE`.
-5. **Membership Ownership & Consistency**:
-   - `membership.getUserId().equals(userId)`
-   - `membership.getTenantId().equals(tenantId)`
-   - If `membershipId` claim is present in JWT, `membership.getId().equals(membershipId)`
-6. **Fail-Closed Population**:
-   - `TenantContextHolder` is populated ONLY after all verifications succeed.
-   - MDC logging correlation for `userId` and `tenantId`.
-   - Guaranteed cleanup in `try ... finally { TenantContextHolder.clear(); MDC.remove(...); }`.
-
----
-
-## 8. Implemented Guarantees vs Remaining Limitations
-
-### Implemented Guarantees (Milestone 03)
-- **Zero LocalStorage Tokens**: Access token is held in-memory; refresh token is in an HttpOnly cookie.
-- **Fail-Closed Tenancy**: Zero trust in client headers; tenant context strictly bound from verified JWT claims.
-- **Compromise Quarantine**: Refresh token reuse revokes the entire session family.
-- **Concurrency Safety**: Row-level locking and 10-second rotation grace window prevent tab race conditions.
-- **Cache Isolation**: Tenant switching completely clears TanStack Query cache.
-- **Live Account Status**: Suspended users, suspended tenants, and suspended memberships are immediately blocked even with unexpired JWTs.
-
-### Remaining Scope Boundaries (To be addressed in Milestone 04+)
-- **RBAC & Method Permissions**: Fine-grained role permissions (Owner, Manager, Cashier) and branch-level authority evaluators are deferred to Milestone 04.
-- **CSRF Tokens for Mutating Operations**: Refresh cookie is restricted to SameSite=Lax and Path=/api/v1/auth. In Milestone 04, CSRF double-submit cookies or custom header checks can be evaluated for browser environments that require SameSite=None.
-- **Multi-Factor Authentication (MFA)**: Optional future enhancement for admin tier accounts.
+The test suite validates all security guarantees against PostgreSQL 16 Testcontainers:
+- **Backend Tests**: 43 / 43 passed (0 failures)
+  - `shouldRecoverOriginalRawSuccessorTokenViaHttpOnlyCookieDuringGracePeriodWithoutCreatingNewToken`
+  - `shouldHandleConcurrentRefreshRequestsGracefully`
+  - `shouldDetectRefreshTokenReuseOutsideGracePeriodAndRevokeEntireFamily`
+  - `shouldFailClosedWhenGlobalTokenAccessesTenantProtectedBranchEndpoint`
+  - `shouldRejectGlobalTokenEvenWithXTenantIdHeader`
+  - `shouldAllowTenantScopedTokenToAccessBranchEndpoint`
+  - `shouldRejectTenantTokenWithMismatchingMembershipIdClaim`
+  - `shouldRevokeEntireSessionFamilyOnLogoutAndPreventRestoringSession`
+  - `shouldRejectCookieRefreshWithDisallowedOriginDueToCsrfProtection`
+  - `shouldRejectRequestsWhenUserIsSuspended`
+  - `shouldRejectRequestsWhenTenantIsSuspended`
+  - `shouldRejectRequestsWhenMembershipIsSuspended`
+  - ArchUnit architecture enforcement rules
+- **Frontend Tests**: 12 / 12 passed (0 failures) across 4 Vitest test suites
+- **Build**: `./gradlew build` and `npm run build` both succeeded with zero errors.

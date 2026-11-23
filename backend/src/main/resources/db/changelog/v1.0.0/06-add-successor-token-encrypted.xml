@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-06-add-successor-token-encrypted" author="savdocrm-security">
+        <comment>Add encrypted successor token and successor hash to support idempotent grace window rotation</comment>
+        <addColumn tableName="refresh_tokens">
+            <column name="successor_token_encrypted" type="TEXT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="successor_token_hash" type="VARCHAR(64)">
+                <constraints nullable="true"/>
+            </column>
+        </addColumn>
+
+        <rollback>
+            <dropColumn tableName="refresh_tokens" columnName="successor_token_encrypted"/>
+            <dropColumn tableName="refresh_tokens" columnName="successor_token_hash"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

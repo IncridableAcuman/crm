@@ -98,6 +98,9 @@ class AuthIntegrationTest {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private com.savdocrm.shared.security.JwtTokenProvider jwtTokenProvider;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
@@ -699,5 +702,250 @@ class AuthIntegrationTest {
 
         // ThreadLocal cleanup guarantee: Context must be empty
         assertThat(TenantContextHolder.getContext()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Should recover original raw successor token via HttpOnly cookie in grace window without creating new token")
+    void shouldRecoverOriginalRawSuccessorTokenViaHttpOnlyCookieDuringGracePeriodWithoutCreatingNewToken() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("grace.recovery@example.com")
+                .username("gracerecovery")
+                .password("Password123!")
+                .firstName("Grace")
+                .lastName("Window")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie token1Cookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(token1Cookie).isNotNull();
+
+        // 1st Normal Rotation: Token 1 -> Token 2
+        MvcResult rotateResult = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("Set-Cookie"))
+                .andReturn();
+
+        Cookie token2Cookie = rotateResult.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(token2Cookie).isNotNull();
+        assertThat(token2Cookie.getValue()).isNotEqualTo(token1Cookie.getValue());
+
+        // Count tokens in database: exactly 2 tokens (token1 revoked, token2 active)
+        List<RefreshToken> initialTokens = refreshTokenRepository.findAll();
+        assertThat(initialTokens).hasSize(2);
+
+        // Replay Token 1 inside grace window (< 10 seconds):
+        // Must recover raw Token 2 via authenticated AES-256-GCM decryption and return Set-Cookie with Token 2
+        MvcResult replayResult = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").isString())
+                .andExpect(header().exists("Set-Cookie"))
+                .andReturn();
+
+        Cookie recoveredCookie = replayResult.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(recoveredCookie).isNotNull();
+        assertThat(recoveredCookie.getValue())
+                .as("Grace window recovery must return the exact successor token without generating a new one")
+                .isEqualTo(token2Cookie.getValue());
+
+        // Verify that NO new token was minted: DB still has exactly 2 tokens!
+        List<RefreshToken> tokensAfterReplay = refreshTokenRepository.findAll();
+        assertThat(tokensAfterReplay).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("Should fail closed with 403 when global login token accesses tenant business API")
+    void shouldFailClosedWhenGlobalTokenAccessesTenantProtectedBranchEndpoint() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("globalonly@example.com")
+                .username("globaluser")
+                .password("Password123!")
+                .firstName("Global")
+                .lastName("User")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String globalToken = objectMapper.readTree(regResult.getResponse().getContentAsString())
+                .get("data").get("accessToken").asText();
+
+        // Attempt to access tenant-protected /api/v1/branches with global token
+        mockMvc.perform(get("/api/v1/branches")
+                        .header("Authorization", "Bearer " + globalToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Tenant Context Missing"));
+    }
+
+    @Test
+    @DisplayName("Should reject global token even when malicious X-Tenant-Id header is provided")
+    void shouldRejectGlobalTokenEvenWithXTenantIdHeader() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("spoofed.header@example.com")
+                .username("spoofuser")
+                .password("Password123!")
+                .firstName("Spoof")
+                .lastName("Header")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String globalToken = objectMapper.readTree(regResult.getResponse().getContentAsString())
+                .get("data").get("accessToken").asText();
+
+        // Pass spoofed X-Tenant-Id header with global token
+        mockMvc.perform(get("/api/v1/branches")
+                        .header("Authorization", "Bearer " + globalToken)
+                        .header("X-Tenant-Id", UUID.randomUUID().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Tenant Context Missing"));
+    }
+
+    @Test
+    @DisplayName("Should allow tenant-scoped token to access tenant branch business API")
+    void shouldAllowTenantScopedTokenToAccessBranchEndpoint() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("tenantscoped@example.com")
+                .username("tenantuser")
+                .password("Password123!")
+                .firstName("Tenant")
+                .lastName("Scoped")
+                .storeName("Tenant Scoped Store")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String tenantToken = objectMapper.readTree(regResult.getResponse().getContentAsString())
+                .get("data").get("accessToken").asText();
+
+        // Access tenant-protected /api/v1/branches with tenant-scoped token
+        mockMvc.perform(get("/api/v1/branches")
+                        .header("Authorization", "Bearer " + tenantToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    @DisplayName("Should reject tenant-scoped token when membershipId claim does not match active membership")
+    void shouldRejectTenantTokenWithMismatchingMembershipIdClaim() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("mismatch.membership@example.com")
+                .username("mismatchuser")
+                .password("Password123!")
+                .firstName("Mismatch")
+                .lastName("User")
+                .storeName("Store A")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String body = regResult.getResponse().getContentAsString();
+        UUID tenantId = UUID.fromString(objectMapper.readTree(body).get("data").get("activeTenant").get("tenantId").asText());
+        User user = userRepository.findByEmailIgnoreCase("mismatch.membership@example.com").orElseThrow();
+
+        // Forge a token with valid userId and tenantId, but bogus membershipId
+        UUID bogusMembershipId = UUID.randomUUID();
+        String forgedToken = jwtTokenProvider.generateTenantAccessToken(
+                user.getId(), user.getEmail(), tenantId, bogusMembershipId);
+
+        mockMvc.perform(get("/api/v1/branches")
+                        .header("Authorization", "Bearer " + forgedToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value("Tenant membership claim missing or mismatch."));
+    }
+
+    @Test
+    @DisplayName("Should revoke entire session family on logout and prevent restoring session")
+    void shouldRevokeEntireSessionFamilyOnLogoutAndPreventRestoringSession() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("logoutfamily@example.com")
+                .username("logoutfam")
+                .password("Password123!")
+                .firstName("Fam")
+                .lastName("Revoke")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie token1Cookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Rotate to Token 2
+        MvcResult rotateRes = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie token2Cookie = rotateRes.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Logout using Token 2
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .cookie(token2Cookie))
+                .andExpect(status().isOk());
+
+        // Verify in DB that all tokens in the family have been revoked
+        List<RefreshToken> tokens = refreshTokenRepository.findAll();
+        assertThat(tokens).isNotEmpty();
+        assertThat(tokens).allMatch(RefreshToken::isRevoked);
+
+        // Attempting to refresh with Token 1 or Token 2 fails with 401
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token2Cookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Should reject cookie-authenticated refresh request from unauthorized origin (CSRF protection)")
+    void shouldRejectCookieRefreshWithDisallowedOriginDueToCsrfProtection() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("csrf@example.com")
+                .username("csrfuser")
+                .password("Password123!")
+                .firstName("Csrf")
+                .lastName("Protection")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie refreshCookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Attack scenario: malicious website attempts cross-site POST with cookie
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(refreshCookie)
+                        .header("Origin", "https://malicious-attacker-site.com"))
+                .andExpect(status().isForbidden());
     }
 }

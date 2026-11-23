@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/savdocrm}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/savdocrm}
     username: ${POSTGRES_USER:savdocrm_user}
     password: ${POSTGRES_PASSWORD:savdocrm_secret_dev}
     driver-class-name: org.postgresql.Driver

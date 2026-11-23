@@ -99,6 +99,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> refreshToken(
             @RequestBody(required = false) RefreshTokenRequest request,
             HttpServletRequest httpRequest) {
+        authCookieService.validateOriginForCookieAuth(httpRequest);
         String ipAddress = extractClientIp(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
 
@@ -124,6 +125,7 @@ public class AuthController {
     public ResponseEntity<ApiResponse<Void>> logout(
             @RequestBody(required = false) RefreshTokenRequest request,
             HttpServletRequest httpRequest) {
+        authCookieService.validateOriginForCookieAuth(httpRequest);
         String rawToken = authCookieService.extractRefreshTokenFromCookies(httpRequest)
                 .orElseGet(() -> request != null ? request.getRefreshToken() : null);
 

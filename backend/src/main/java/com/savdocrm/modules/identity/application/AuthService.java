@@ -23,6 +23,7 @@ import com.savdocrm.modules.tenancy.infrastructure.TenantRepository;
 import com.savdocrm.shared.multitenancy.TenantExecutionTemplate;
 import com.savdocrm.shared.security.JwtProperties;
 import com.savdocrm.shared.security.JwtTokenProvider;
+import com.savdocrm.shared.security.TokenEncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -53,6 +54,7 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtProperties jwtProperties;
     private final PasswordEncoder passwordEncoder;
+    private final TokenEncryptionService tokenEncryptionService;
 
     @Transactional
     public AuthResponse register(RegisterRequest request, String ipAddress, String userAgent) {
@@ -255,49 +257,61 @@ public class AuthService {
                     && refreshToken.getRevokedAt() != null
                     && refreshToken.getRevokedAt().isAfter(Instant.now().minusSeconds(10));
 
-            if (isRecentRotation) {
+            if (isRecentRotation && refreshToken.getSuccessorTokenEncrypted() != null) {
                 log.debug("Concurrent refresh request within grace window for token family {}", refreshToken.getTokenFamily());
-                Optional<RefreshToken> activeChild = refreshTokenRepository
-                        .findFirstByTokenFamilyAndRevokedFalseOrderByCreatedAtDesc(refreshToken.getTokenFamily());
 
-                if (activeChild.isPresent() && activeChild.get().isValid()) {
-                    RefreshToken activeToken = activeChild.get();
-                    User user = userRepository.findById(activeToken.getUserId())
-                            .orElseThrow(() -> new BadCredentialsException("User not found."));
+                try {
+                    String decryptedSuccessorToken = tokenEncryptionService.decrypt(refreshToken.getSuccessorTokenEncrypted());
+                    String expectedSuccessorHash = refreshToken.getSuccessorTokenHash();
 
-                    if (!user.isActive()) {
-                        throw new DisabledException("User account is disabled or suspended.");
+                    if (decryptedSuccessorToken != null && expectedSuccessorHash != null) {
+                        String actualDecryptedHash = jwtTokenProvider.hashToken(decryptedSuccessorToken);
+                        if (expectedSuccessorHash.equals(actualDecryptedHash)) {
+                            Optional<RefreshToken> successorOpt = refreshTokenRepository.findByTokenHash(expectedSuccessorHash);
+                            if (successorOpt.isPresent() && successorOpt.get().isValid()
+                                    && successorOpt.get().getTokenFamily().equals(refreshToken.getTokenFamily())) {
+                                RefreshToken activeSuccessor = successorOpt.get();
+                                User user = userRepository.findById(activeSuccessor.getUserId())
+                                        .orElseThrow(() -> new BadCredentialsException("User not found."));
+
+                                if (!user.isActive()) {
+                                    throw new DisabledException("User account is disabled or suspended.");
+                                }
+
+                                UUID tenantId = activeSuccessor.getTenantId();
+                                String accessToken;
+                                if (tenantId != null) {
+                                    TenantMembership membership = tenantMembershipRepository
+                                            .findByTenantIdAndUserId(tenantId, user.getId())
+                                            .filter(TenantMembership::isActive)
+                                            .orElseThrow(() -> new AccessDeniedException("User membership is inactive."));
+
+                                    accessToken = jwtTokenProvider.generateTenantAccessToken(
+                                            user.getId(), user.getEmail(), tenantId, membership.getId());
+                                } else {
+                                    accessToken = jwtTokenProvider.generateGlobalAccessToken(user.getId(), user.getEmail());
+                                }
+
+                                List<UserTenantMembershipDto> availableTenants = buildAvailableTenants(user.getId(), tenantId);
+                                UserTenantMembershipDto activeTenant = availableTenants.stream()
+                                        .filter(UserTenantMembershipDto::isCurrent)
+                                        .findFirst()
+                                        .orElse(null);
+
+                                return AuthResponse.builder()
+                                        .accessToken(accessToken)
+                                        .refreshToken(decryptedSuccessorToken)
+                                        .tokenType("Bearer")
+                                        .expiresIn(jwtProperties.getAccessTokenExpirationSeconds())
+                                        .user(toUserProfileDto(user))
+                                        .activeTenant(activeTenant)
+                                        .availableTenants(availableTenants)
+                                        .build();
+                            }
+                        }
                     }
-
-                    UUID tenantId = activeToken.getTenantId();
-                    String accessToken;
-                    if (tenantId != null) {
-                        TenantMembership membership = tenantMembershipRepository
-                                .findByTenantIdAndUserId(tenantId, user.getId())
-                                .filter(TenantMembership::isActive)
-                                .orElseThrow(() -> new AccessDeniedException("User membership is inactive."));
-
-                        accessToken = jwtTokenProvider.generateTenantAccessToken(
-                                user.getId(), user.getEmail(), tenantId, membership.getId());
-                    } else {
-                        accessToken = jwtTokenProvider.generateGlobalAccessToken(user.getId(), user.getEmail());
-                    }
-
-                    List<UserTenantMembershipDto> availableTenants = buildAvailableTenants(user.getId(), tenantId);
-                    UserTenantMembershipDto activeTenant = availableTenants.stream()
-                            .filter(UserTenantMembershipDto::isCurrent)
-                            .findFirst()
-                            .orElse(null);
-
-                    return AuthResponse.builder()
-                            .accessToken(accessToken)
-                            .refreshToken(null) // Cookie remains active
-                            .tokenType("Bearer")
-                            .expiresIn(jwtProperties.getAccessTokenExpirationSeconds())
-                            .user(toUserProfileDto(user))
-                            .activeTenant(activeTenant)
-                            .availableTenants(availableTenants)
-                            .build();
+                } catch (Exception e) {
+                    log.warn("Failed to recover successor token during grace window: {}", e.getMessage());
                 }
             }
 
@@ -341,14 +355,16 @@ public class AuthService {
             membershipId = membership.getId();
         }
 
-        // Rotate token: revoke old token
-        refreshToken.revoke("Rotated");
-        refreshTokenRepository.save(refreshToken);
-
         // Issue new refresh token within the same token family
         String newRawRefreshToken = jwtTokenProvider.generateRawRefreshToken();
+        String newSuccessorHash = jwtTokenProvider.hashToken(newRawRefreshToken);
         createAndSaveRefreshToken(
                 user.getId(), tenantId, refreshToken.getTokenFamily(), newRawRefreshToken, ipAddress, userAgent);
+
+        // Encrypt the successor token using AES-256-GCM for idempotent grace window recovery
+        String encryptedSuccessor = tokenEncryptionService.encrypt(newRawRefreshToken);
+        refreshToken.rotate(encryptedSuccessor, newSuccessorHash);
+        refreshTokenRepository.save(refreshToken);
 
         String newAccessToken;
         if (tenantId != null) {
@@ -380,8 +396,7 @@ public class AuthService {
         if (rawRefreshToken != null && !rawRefreshToken.isBlank()) {
             String tokenHash = jwtTokenProvider.hashToken(rawRefreshToken.trim());
             refreshTokenRepository.findByTokenHash(tokenHash).ifPresent(token -> {
-                token.revoke("User logout");
-                refreshTokenRepository.save(token);
+                refreshTokenRepository.revokeTokenFamily(token.getTokenFamily(), Instant.now(), "User logout");
             });
         }
     }

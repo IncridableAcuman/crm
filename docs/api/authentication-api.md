@@ -280,3 +280,19 @@ Retrieves current identity profile and available store memberships.
   "timestamp": "2026-11-23T16:30:00Z"
 }
 ```
+
+---
+
+## 3. Token Scope & Authorization Boundaries
+
+### 3.1 Global Login Token vs Tenant-Scoped Token
+- **Global Token** (`POST /login`): Contains `userId`, `email`, but `tenantId: null` and `membershipId: null`. Permitted to access `/api/v1/auth/me` and `/api/v1/auth/select-tenant`. Fails closed (`403 Forbidden: Tenant Context Missing`) on tenant business endpoints (e.g. `/api/v1/branches`).
+- **Tenant-Scoped Token** (`POST /select-tenant`): Contains `userId`, `email`, `tenantId`, and `membershipId`. Establishes `TenantContextHolder` and accesses tenant-scoped business APIs.
+- **Client Header Isolation**: `X-Tenant-Id` header is never trusted or parsed for authorization context.
+
+### 3.2 CSRF Protection on Cookie Endpoints
+- Requests using refresh cookies (`POST /refresh`, `POST /logout`) validate the HTTP `Origin` header against explicit whitelist `cors.allowed-origins`. Unlisted cross-site origins receive `403 Forbidden`.
+
+### 3.3 Idempotent Rotation in 10s Grace Window
+- Within 10 seconds of rotation, replaying the old token returns the exact same successor token via `Set-Cookie` using AES-256-GCM authenticated recovery. No new token is minted.
+- Replaying the old token after 10 seconds revokes the entire token family (`401 Unauthorized: token reuse detected`).
