@@ -101,6 +101,12 @@ class AuthIntegrationTest {
     @Autowired
     private com.savdocrm.shared.security.JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private com.savdocrm.modules.identity.application.AuthService authService;
+
+    @Autowired
+    private com.savdocrm.shared.security.TokenEncryptionService tokenEncryptionService;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
@@ -423,7 +429,8 @@ class AuthIntegrationTest {
 
         // Rotate via cookie
         MvcResult refreshResult = mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(initialCookie))
+                        .cookie(initialCookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.accessToken").isString())
@@ -462,7 +469,8 @@ class AuthIntegrationTest {
         for (int i = 0; i < concurrentThreads; i++) {
             tasks.add(() -> {
                 MvcResult mvcRes = mockMvc.perform(post("/api/v1/auth/refresh")
-                                .cookie(initialCookie))
+                                .cookie(initialCookie)
+                                .header("Origin", "http://localhost:5173"))
                         .andReturn();
                 return mvcRes.getResponse().getStatus();
             });
@@ -499,7 +507,8 @@ class AuthIntegrationTest {
 
         // 1st Refresh: uses token1, issues token2, revokes token1
         MvcResult res1 = mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token1Cookie))
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -517,13 +526,15 @@ class AuthIntegrationTest {
 
         // ATTACKER: presents token1 replay outside grace window
         mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token1Cookie))
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.detail").value("Invalid refresh token: token reuse detected."));
 
         // LEGITIMATE USER: token2 must now also be rejected because whole family was revoked
         mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token2Cookie))
+                        .cookie(token2Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isUnauthorized());
 
         // Verify all tokens in family are marked revoked in database
@@ -553,7 +564,8 @@ class AuthIntegrationTest {
         assertThat(refreshCookie).isNotNull();
 
         MvcResult logoutResult = mockMvc.perform(post("/api/v1/auth/logout")
-                        .cookie(refreshCookie))
+                        .cookie(refreshCookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk())
                 .andExpect(header().exists("Set-Cookie"))
                 .andReturn();
@@ -565,7 +577,8 @@ class AuthIntegrationTest {
 
         // Subsequent refresh must fail with 401
         mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(refreshCookie))
+                        .cookie(refreshCookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -726,7 +739,8 @@ class AuthIntegrationTest {
 
         // 1st Normal Rotation: Token 1 -> Token 2
         MvcResult rotateResult = mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token1Cookie))
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk())
                 .andExpect(header().exists("Set-Cookie"))
                 .andReturn();
@@ -742,7 +756,8 @@ class AuthIntegrationTest {
         // Replay Token 1 inside grace window (< 10 seconds):
         // Must recover raw Token 2 via authenticated AES-256-GCM decryption and return Set-Cookie with Token 2
         MvcResult replayResult = mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token1Cookie))
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.accessToken").isString())
@@ -898,14 +913,16 @@ class AuthIntegrationTest {
 
         // Rotate to Token 2
         MvcResult rotateRes = mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token1Cookie))
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk())
                 .andReturn();
         Cookie token2Cookie = rotateRes.getResponse().getCookie("savdocrm_refresh_token");
 
         // Logout using Token 2
         mockMvc.perform(post("/api/v1/auth/logout")
-                        .cookie(token2Cookie))
+                        .cookie(token2Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isOk());
 
         // Verify in DB that all tokens in the family have been revoked
@@ -915,11 +932,13 @@ class AuthIntegrationTest {
 
         // Attempting to refresh with Token 1 or Token 2 fails with 401
         mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token1Cookie))
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isUnauthorized());
 
         mockMvc.perform(post("/api/v1/auth/refresh")
-                        .cookie(token2Cookie))
+                        .cookie(token2Cookie)
+                        .header("Origin", "http://localhost:5173"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -947,5 +966,345 @@ class AuthIntegrationTest {
                         .cookie(refreshCookie)
                         .header("Origin", "https://malicious-attacker-site.com"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Should detect refresh token replay by a second client during grace window and revoke entire token family")
+    void shouldDetectRefreshTokenReplayBySecondClientAndRevokeEntireFamily() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("secondclient@example.com")
+                .username("secondclient_user")
+                .password("Password123!")
+                .firstName("Client")
+                .lastName("One")
+                .build();
+
+        // 1. Legitimate user registers from legitimate browser
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie token1Cookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(token1Cookie).isNotNull();
+
+        // 2. Legitimate user rotates Token 1 -> Token 2
+        MvcResult rotateResult = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie token2Cookie = rotateResult.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(token2Cookie).isNotNull();
+
+        // 3. Attacker (second client) steals Token 1 and replays it during the 10-second grace window,
+        // but with a different User-Agent / client fingerprint
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173")
+                        .header("User-Agent", "AttackerTool/3.1 (Linux x86_64)"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("Invalid refresh token: token replay detected."));
+
+        // 4. Verification: Entire token family must be revoked immediately
+        List<RefreshToken> allFamilyTokens = refreshTokenRepository.findAll();
+        assertThat(allFamilyTokens).isNotEmpty();
+        assertThat(allFamilyTokens).allMatch(RefreshToken::isRevoked);
+
+        // 5. Even legitimate user's Token 2 is now invalidated because the session was compromised and family revoked
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token2Cookie)
+                        .header("Origin", "http://localhost:5173")
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Should recover successor token during network failure retry from the same browser session")
+    void shouldRecoverSuccessorDuringNetworkFailureOrLostResponseFromSameBrowserSession() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("lostresponse@example.com")
+                .username("lostresp_user")
+                .password("Password123!")
+                .firstName("Lost")
+                .lastName("Response")
+                .build();
+
+        String userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)";
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .header("User-Agent", userAgent)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie token1Cookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // First rotation succeeded on server
+        MvcResult rotateRes = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173")
+                        .header("User-Agent", userAgent))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie token2Cookie = rotateRes.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Client experienced network drop (lost response). Client still holds Token 1.
+        // Client retries with Token 1 from the same browser session within grace window (<10s)
+        MvcResult retryRes = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173")
+                        .header("User-Agent", userAgent))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.accessToken").isString())
+                .andExpect(header().exists("Set-Cookie"))
+                .andReturn();
+
+        Cookie recoveredCookie = retryRes.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(recoveredCookie).isNotNull();
+        assertThat(recoveredCookie.getValue()).isEqualTo(token2Cookie.getValue());
+
+        // Exactly 2 tokens in DB (token 1 rotated, token 2 active; no extra token minted)
+        List<RefreshToken> tokens = refreshTokenRepository.findAll();
+        assertThat(tokens).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("Should reject expired refresh token with appropriate error")
+    void shouldRejectExpiredRefreshToken() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("expired@example.com")
+                .username("expired_user")
+                .password("Password123!")
+                .firstName("Expired")
+                .lastName("Token")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie refreshCookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Manually expire token in database
+        List<RefreshToken> tokens = refreshTokenRepository.findAll();
+        for (RefreshToken t : tokens) {
+            t.setExpiresAt(Instant.now().minusSeconds(60));
+            refreshTokenRepository.save(t);
+        }
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(refreshCookie)
+                        .header("Origin", "http://localhost:5173"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("Refresh token has expired."));
+    }
+
+    @Test
+    @DisplayName("Should allow successor recovery across encryption key rotation without breaking active sessions")
+    void shouldAllowSuccessorRecoveryAcrossEncryptionKeyRotation() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("keyrotation@example.com")
+                .username("keyrot_user")
+                .password("Password123!")
+                .firstName("Key")
+                .lastName("Rotation")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie token1Cookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Token 1 rotated under active key v1
+        MvcResult rotateRes = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        Cookie token2Cookie = rotateRes.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Administrator rotates encryption key to v2
+        tokenEncryptionService.rotateKey("v2", "completelyNewDedicatedKeySecretForRotationSecurity2026!");
+        assertThat(tokenEncryptionService.getActiveKeyVersion()).isEqualTo("v2");
+
+        // Replay Token 1 inside grace window:
+        // Must successfully decrypt v1 successor using historical key without breaking session!
+        MvcResult replayRes = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andReturn();
+
+        Cookie recoveredCookie = replayRes.getResponse().getCookie("savdocrm_refresh_token");
+        assertThat(recoveredCookie).isNotNull();
+        assertThat(recoveredCookie.getValue()).isEqualTo(token2Cookie.getValue());
+    }
+
+    @Test
+    @DisplayName("Should reject cookie-authenticated refresh when Origin and Referer are both missing (CSRF protection)")
+    void shouldRejectCookieRefreshWithMissingOriginAndMissingReferer() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("missingorigin@example.com")
+                .username("missingorig_user")
+                .password("Password123!")
+                .firstName("Missing")
+                .lastName("Origin")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie refreshCookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Request with cookie but WITHOUT Origin and WITHOUT Referer must be blocked
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(refreshCookie))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.detail").value("CSRF protection: Missing Origin and Referer headers on cookie-authenticated request."));
+    }
+
+    @Test
+    @DisplayName("Should reject cookie-authenticated refresh when Origin is null (sandboxed iframe CSRF attack)")
+    void shouldRejectCookieRefreshWithNullOrigin() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("nullorigin@example.com")
+                .username("nullorig_user")
+                .password("Password123!")
+                .firstName("Null")
+                .lastName("Origin")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie refreshCookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(refreshCookie)
+                        .header("Origin", "null"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Should reject cookie-authenticated refresh when Referer is unauthorized")
+    void shouldRejectCookieRefreshWithUnauthorizedReferer() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("badreferer@example.com")
+                .username("badref_user")
+                .password("Password123!")
+                .firstName("Bad")
+                .lastName("Referer")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie refreshCookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Origin absent, but unauthorized Referer present
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(refreshCookie)
+                        .header("Referer", "https://attacker.evil.com/phishing/login"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Should allow cookie-authenticated refresh when Origin is absent but Referer is authorized (fallback)")
+    void shouldAllowCookieRefreshWithAuthorizedRefererFallback() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("goodreferer@example.com")
+                .username("goodref_user")
+                .password("Password123!")
+                .firstName("Good")
+                .lastName("Referer")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie refreshCookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Origin absent, but permitted Referer present
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(refreshCookie)
+                        .header("Referer", "http://localhost:5173/dashboard"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    @DisplayName("Should clean up expired encrypted successor material from PostgreSQL while retaining token hash")
+    void shouldCleanUpExpiredEncryptedSuccessorMaterialWhilePreservingTokenHash() throws Exception {
+        RegisterRequest register = RegisterRequest.builder()
+                .email("cleanup@example.com")
+                .username("cleanup_user")
+                .password("Password123!")
+                .firstName("Clean")
+                .lastName("Up")
+                .build();
+
+        MvcResult regResult = mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(register)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie token1Cookie = regResult.getResponse().getCookie("savdocrm_refresh_token");
+
+        // Rotate Token 1 -> Token 2
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(token1Cookie)
+                        .header("Origin", "http://localhost:5173"))
+                .andExpect(status().isOk());
+
+        // Verify that Token 1 has both encrypted successor and successor hash in DB
+        List<RefreshToken> tokens = refreshTokenRepository.findAll();
+        RefreshToken rotatedToken = tokens.stream().filter(RefreshToken::isRevoked).findFirst().orElseThrow();
+        assertThat(rotatedToken.getSuccessorTokenEncrypted()).isNotNull();
+        assertThat(rotatedToken.getSuccessorTokenHash()).isNotNull();
+
+        String successorHash = rotatedToken.getSuccessorTokenHash();
+
+        // Simulate grace period expiry (> 10s ago)
+        rotatedToken.setRevokedAt(Instant.now().minusSeconds(30));
+        refreshTokenRepository.save(rotatedToken);
+
+        // Run cleanup strategy
+        int cleaned = authService.cleanupExpiredSuccessorTokens(Instant.now().minusSeconds(10));
+        assertThat(cleaned).isGreaterThanOrEqualTo(1);
+
+        // Verify from database: successor_token_encrypted is now NULL!
+        RefreshToken reloaded = refreshTokenRepository.findById(rotatedToken.getId()).orElseThrow();
+        assertThat(reloaded.getSuccessorTokenEncrypted()).isNull();
+
+        // Audit integrity requirement: successor_token_hash is STILL PRESERVED!
+        assertThat(reloaded.getSuccessorTokenHash()).isEqualTo(successorHash);
     }
 }

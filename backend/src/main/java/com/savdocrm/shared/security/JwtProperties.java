@@ -17,6 +17,12 @@ public class JwtProperties {
     private String secret = "v8y/B?E(H+MbQeThWmZq4t7w!z%C*F-J@NcRfUjXn2r5u8x/A?D(G+KbPdSgVkYp";
 
     /**
+     * Dedicated secret key for token encryption (AES-256-GCM).
+     * If not explicitly configured, falls back to HKDF derivation from secret with domain separation.
+     */
+    private String encryptionSecret;
+
+    /**
      * Access token validity in seconds. Default: 15 minutes (900 seconds).
      */
     private long accessTokenExpirationSeconds = 900;

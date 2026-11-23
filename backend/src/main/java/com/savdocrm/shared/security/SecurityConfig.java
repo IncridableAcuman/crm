@@ -82,6 +82,9 @@ public class SecurityConfig {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
+        if (origins.contains("*")) {
+            throw new IllegalArgumentException("CORS error: Wildcard '*' origin is strictly forbidden when credentials are enabled.");
+        }
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));

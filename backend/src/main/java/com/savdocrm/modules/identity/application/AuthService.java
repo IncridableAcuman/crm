@@ -258,7 +258,18 @@ public class AuthService {
                     && refreshToken.getRevokedAt().isAfter(Instant.now().minusSeconds(10));
 
             if (isRecentRotation && refreshToken.getSuccessorTokenEncrypted() != null) {
-                log.debug("Concurrent refresh request within grace window for token family {}", refreshToken.getTokenFamily());
+                // Verify request sender identity against original token session
+                boolean isSameClient = isSameClientSession(refreshToken, ipAddress, userAgent);
+
+                if (!isSameClient) {
+                    log.warn("Refresh token replay detected from second client during grace window for family {}! Expected IP: {}, Actual IP: {}, Expected UA: {}, Actual UA: {}. Revoking entire token family.",
+                            refreshToken.getTokenFamily(), refreshToken.getCreatedIp(), ipAddress, refreshToken.getUserAgent(), userAgent);
+                    refreshTokenRepository.revokeTokenFamily(
+                            refreshToken.getTokenFamily(), Instant.now(), "Token replay detected from second client");
+                    throw new BadCredentialsException("Invalid refresh token: token replay detected.");
+                }
+
+                log.debug("Concurrent refresh request within grace window from same browser session for token family {}", refreshToken.getTokenFamily());
 
                 try {
                     String decryptedSuccessorToken = tokenEncryptionService.decrypt(refreshToken.getSuccessorTokenEncrypted());
@@ -365,6 +376,9 @@ public class AuthService {
         String encryptedSuccessor = tokenEncryptionService.encrypt(newRawRefreshToken);
         refreshToken.rotate(encryptedSuccessor, newSuccessorHash);
         refreshTokenRepository.save(refreshToken);
+
+        // Clean up expired encrypted successor material older than grace cutoff (10 seconds)
+        refreshTokenRepository.clearExpiredSuccessorTokens(Instant.now().minusSeconds(10));
 
         String newAccessToken;
         if (tenantId != null) {
@@ -489,5 +503,25 @@ public class AuthService {
             counter++;
         }
         return code;
+    }
+
+    @Transactional
+    public int cleanupExpiredSuccessorTokens(Instant cutoff) {
+        log.debug("Cleaning up expired encrypted successor tokens older than {}", cutoff);
+        return refreshTokenRepository.clearExpiredSuccessorTokens(cutoff);
+    }
+
+    private boolean isSameClientSession(RefreshToken token, String ipAddress, String userAgent) {
+        if (token.getCreatedIp() != null && ipAddress != null) {
+            if (!token.getCreatedIp().trim().equalsIgnoreCase(ipAddress.trim())) {
+                return false;
+            }
+        }
+        if (token.getUserAgent() != null && userAgent != null) {
+            if (!token.getUserAgent().trim().equals(userAgent.trim())) {
+                return false;
+            }
+        }
+        return true;
     }
 }

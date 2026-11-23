@@ -98,54 +98,60 @@ jwt:
 - **Architecture**: Frontend at `https://store-app.com` and backend at `https://savdocrm-api.com` (different registrable domains).
 - **Cookie Policy**: Requires `SameSite=None; Secure; HttpOnly; Path=/api/v1/auth`.
 - **CSRF Defense**:
-  1. **Strict Origin Validation**: `AuthCookieService.validateOriginForCookieAuth` rejects any cookie-bearing request whose `Origin` does not strictly match `cors.allowed-origins`.
-  2. **Preflight Enforcement**: Requests carry custom headers or JSON payloads that mandate CORS preflight checks (`OPTIONS`), verified against explicit origin whitelists without wildcards.
+  1. **Strict Origin & Referer Validation**: `AuthCookieService.validateOriginForCookieAuth` protects `/refresh` and `/logout`:
+     - Rejects `Origin: null` (used in sandboxed iframe / data URI attacks) with `403 Forbidden`.
+     - Validates `Origin` against `cors.allowed-origins` using exact scheme, host, and port matching.
+     - Falls back to `Referer` if `Origin` is omitted, parsing and validating the origin against the allowlist.
+     - Strictly rejects any cookie-bearing request where both `Origin` and `Referer` are missing.
+     - Strictly forbids wildcard `'*'` origins when credentials are enabled.
+  2. **Preflight Enforcement**: Requests carry custom headers or JSON payloads that mandate CORS preflight checks (`OPTIONS`), verified against explicit origin allowlists without wildcards.
   3. **Path Scoping**: Cookies are restricted exclusively to `/api/v1/auth`, ensuring business API endpoints are protected strictly by in-memory Bearer tokens.
 
 ---
 
-## 5. Refresh Token Grace Window & Cryptographic Successor Recovery
+## 5. Refresh Token Security Protocol, Key Management & Replay Analysis
 
-```
-Client Request with Old Token T0
-           │
-           ▼
-[PESSIMISTIC_WRITE Row Lock on T0] (PostgreSQL SELECT ... FOR UPDATE)
-           │
-           ├─► Is T0 valid (not revoked, not expired)?
-           │      └─► Proceed with normal rotation:
-           │            1. Generate new raw T1.
-           │            2. Save T1 (hash = H(T1)).
-           │            3. Encrypt raw T1 via AES-256-GCM.
-           │            4. Update T0: revoked=true, reason="Rotated",
-           │               successor_token_encrypted=enc(T1), successor_token_hash=H(T1).
-           │            5. Deliver T1 in HttpOnly Set-Cookie + fresh access token.
-           │
-           └─► Is T0 revoked?
-                  │
-                  ├─► Reason == "Rotated" AND elapsed <= 10 seconds?
-                  │      │
-                  │      └─► (CONCURRENCY GRACE WINDOW):
-                  │            1. Decrypt raw T1 from T0.successor_token_encrypted.
-                  │            2. Verify H(T1) == T0.successor_token_hash.
-                  │            3. Verify T1 exists, is valid, and belongs to same family.
-                  │            4. Return IDEMPOTENT result:
-                  │               Deliver T1 in HttpOnly Set-Cookie + fresh access token.
-                  │               **NO NEW REFRESH TOKEN IS MINTED.**
-                  │
-                  └─► Reason != "Rotated" OR elapsed > 10 seconds?
-                         │
-                         └─► (TOKEN REUSE DETECTED / ATTACK):
-                               1. Quarantine: revoke entire token family in DB.
-                               2. Throw 401 Unauthorized ("Token reuse detected").
-                               3. Terminate all sessions in the family.
-```
+### 5.1 The Replay Threat During Server Grace Windows
+In traditional server-side grace windows, when token $T_0$ is rotated to $T_1$, the server accepts $T_0$ for a brief period (e.g. 10s) and returns $T_1$.
+**Critical Threat**: If an attacker steals $T_0$, they can replay $T_0$ during the 10-second grace window after legitimate rotation. Because bearer tokens possess no sender-identity proof, the server cannot distinguish between:
+1. A legitimate concurrent browser request or lost-response retry.
+2. A replay attack by an attacker holding the stolen bearer credential.
 
-### Security Properties Guaranteed:
-1. **No Token Forking / Replay Inflation**: A replayed old token can never produce a new or branched refresh token. It only reproduces the exact successor $T_1$ idempotently.
-2. **Security at Rest**: Raw tokens are never stored in plaintext. $T_1$'s active record contains only its SHA-256 hash. $T_0$'s record contains $T_1$ encrypted using authenticated AES-256-GCM with a server-derived secret key.
-3. **Serialized Database Locking**: PostgreSQL row locking ensures that parallel threads for the same token execute sequentially without race conditions.
-4. **Immediate Family Quarantine**: When an old token is presented after the 10-second grace window, the entire family is revoked, neutralizing compromised tokens.
+Neither row-level locking (`PESSIMISTIC_WRITE`) nor AES-256-GCM encryption solves this threat:
+- Row-level locking only serializes database operations.
+- AES-256-GCM only guarantees confidentiality and integrity at rest in PostgreSQL; it does not authenticate the requester.
+
+### 5.2 Selected Defense Architecture
+To minimize replay risk while preserving seamless multi-tab usability, SAVDOCRM implements a multi-layer defense:
+
+1. **Frontend Cross-Tab & Single-Flight Coordination (Web Locks API + BroadcastChannel)**:
+   - Modern browsers coordinate refresh calls across all open tabs using the **Web Locks API** (`navigator.locks.request('savdocrm_refresh_lock', ...)`).
+   - Only one tab across all windows executes `/api/v1/auth/refresh` at any time.
+   - When the active tab finishes, it broadcasts `REFRESH_SUCCESS` with the new access token via `BroadcastChannel`.
+   - Queued tabs acquire the lock, detect that the token was already refreshed, and reuse the new token without sending any additional network requests.
+   - If the active tab closes or crashes, the browser engine automatically releases the Web Lock, avoiding deadlocks.
+   - Within each tab, an Axios concurrency queue (`isRefreshing` + `failedQueue`) serializes concurrent 401 interceptor executions.
+
+2. **Backend Client Session Verification During Grace Window**:
+   - When a revoked token is presented within the 10-second grace window:
+     - The server verifies client context: `token.created_ip == request.ip` and `token.user_agent == request.userAgent`.
+     - **Second-Client Replay Detection**: If an attacker from a different IP or User-Agent presents $T_0$, the server immediately detects the replay, **revokes the entire token family**, and returns `401 Unauthorized`.
+     - **Same-Session Concurrency / Lost Response**: If client fingerprint matches, the successor $T_1$ is recovered from authenticated AES-256-GCM storage and returned in `Set-Cookie`.
+
+3. **Cryptographic Key Management (HKDF & Key Rotation)**:
+   - Token encryption key is derived using RFC 5869 **HKDF-SHA256** with domain separation (`savdocrm-hkdf-token-encryption-salt-v1` and dedicated context info).
+   - Dedicated configuration property `jwt.encryption-secret` decouples token encryption from JWT signing (`jwt.secret`).
+   - **Key Versioning & Keyring**: Encrypted tokens carry a version prefix (e.g. `v1:<payload>`, `v2:<payload>`). During key rotation, `TokenEncryptionService.rotateKey(newVersion, newSecret)` registers the new active key while retaining historical keys in a keyring. Existing active sessions encrypted under historical keys decrypt seamlessly without interruption.
+
+4. **Encrypted Successor Database Cleanup**:
+   - `successor_token_encrypted` is only required during the 10-second grace window. Retaining recoverable token plaintext in PostgreSQL indefinitely is a security liability.
+   - Automatic cleanup is executed during token rotation and via `AuthService.cleanupExpiredSuccessorTokens(Instant cutoff)`:
+     - Sets `successor_token_encrypted = NULL` for all tokens where `revoked = true` and `revoked_at < cutoff`.
+     - Preserves `successor_token_hash` (SHA-256) permanently for security auditing, forensic lineage analysis, and reuse detection.
+
+5. **Residual Risks & Trade-Offs**:
+   - **Same-IP/Same-UA Replay Window**: If an attacker on the same NAT IP (e.g. corporate WiFi) also spoofs the victim's User-Agent header, they could theoretically replay $T_0$ within the 10-second window. Cryptographically unforgeable proof-of-possession would require sender-constraining (DPoP, RFC 9449). However, DPoP introduces high architectural overhead (WebCrypto key management, client-side proof signing per request, nonce stores, and replay caches) that was deemed disproportionate for a browser SaaS already fortified by HttpOnly SameSite=Lax Secure cookies, exact Origin validation, and Web Locks.
+   - **Lost Response Availability Trade-Off**: If a network failure occurs after server commit and retry happens after the 10s grace window has elapsed (or if IP changed), the server treats the request as reuse and revokes the family. The user must re-authenticate (login). In financial and CRM enterprise SaaS, security (preventing replay attacks) strictly takes precedence over rare transient network reconnects.
 
 ---
 
@@ -196,10 +202,19 @@ When `POST /api/v1/auth/logout` is called:
 ## 9. Test Verification Summary
 
 The test suite validates all security guarantees against PostgreSQL 16 Testcontainers:
-- **Backend Tests**: 43 / 43 passed (0 failures)
+- **Backend Tests**: 57 / 57 passed (0 failures)
   - `shouldRecoverOriginalRawSuccessorTokenViaHttpOnlyCookieDuringGracePeriodWithoutCreatingNewToken`
   - `shouldHandleConcurrentRefreshRequestsGracefully`
   - `shouldDetectRefreshTokenReuseOutsideGracePeriodAndRevokeEntireFamily`
+  - `shouldDetectRefreshTokenReplayBySecondClientAndRevokeEntireFamily`
+  - `shouldRecoverSuccessorDuringNetworkFailureOrLostResponseFromSameBrowserSession`
+  - `shouldRejectExpiredRefreshToken`
+  - `shouldAllowSuccessorRecoveryAcrossEncryptionKeyRotation`
+  - `shouldRejectCookieRefreshWithMissingOriginAndMissingReferer`
+  - `shouldRejectCookieRefreshWithNullOrigin`
+  - `shouldRejectCookieRefreshWithUnauthorizedReferer`
+  - `shouldAllowCookieRefreshWithAuthorizedRefererFallback`
+  - `shouldCleanUpExpiredEncryptedSuccessorMaterialWhilePreservingTokenHash`
   - `shouldFailClosedWhenGlobalTokenAccessesTenantProtectedBranchEndpoint`
   - `shouldRejectGlobalTokenEvenWithXTenantIdHeader`
   - `shouldAllowTenantScopedTokenToAccessBranchEndpoint`
@@ -209,6 +224,12 @@ The test suite validates all security guarantees against PostgreSQL 16 Testconta
   - `shouldRejectRequestsWhenUserIsSuspended`
   - `shouldRejectRequestsWhenTenantIsSuspended`
   - `shouldRejectRequestsWhenMembershipIsSuspended`
+  - `TokenEncryptionServiceTest` (HKDF key derivation, unique IV per encryption, authenticated decryption, key rotation with multiple key versions, legacy payload compatibility)
   - ArchUnit architecture enforcement rules
-- **Frontend Tests**: 12 / 12 passed (0 failures) across 4 Vitest test suites
-- **Build**: `./gradlew build` and `npm run build` both succeeded with zero errors.
+- **Frontend Tests**: 14 / 14 passed (0 failures) across 4 Vitest test suites
+  - Cross-tab refresh coordination using Web Locks API
+  - Token reuse on concurrent tab wake-up
+  - BroadcastChannel synchronization (`REFRESH_SUCCESS`, `AUTH_CLEARED`)
+  - Single-flight 401 response queue
+  - Tenant switching cache eviction
+- **Build**: `./gradlew test` and `npm run build` both succeeded with zero errors.

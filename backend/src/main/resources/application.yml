@@ -32,6 +32,7 @@ springdoc:
 
 jwt:
   secret: ${JWT_SECRET:v8y/B?E(H+MbQeThWmZq4t7w!z%C*F-J@NcRfUjXn2r5u8x/A?D(G+KbPdSgVkYp}
+  encryption-secret: ${JWT_ENCRYPTION_SECRET:savdocrm-dedicated-token-encryption-secret-key-32b!}
   access-token-expiration-seconds: ${JWT_ACCESS_EXPIRATION:900}
   refresh-token-expiration-seconds: ${JWT_REFRESH_EXPIRATION:2592000}
   issuer: ${JWT_ISSUER:savdocrm-auth}
