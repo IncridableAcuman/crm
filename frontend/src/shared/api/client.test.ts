@@ -182,7 +182,7 @@ describe('HTTP Client & Cross-Tab Coordination', () => {
     expect(sessionStorage.getItem('refreshToken')).toBeNull();
   });
 
-  it('should broadcast REFRESH_SUCCESS without ever broadcasting refresh tokens', async () => {
+  it('should broadcast REFRESH_SUCCESS without ever broadcasting access tokens or refresh tokens', async () => {
     const postMessageSpy = vi.fn();
     if (authChannel) {
       authChannel.postMessage = postMessageSpy;
@@ -192,7 +192,7 @@ describe('HTTP Client & Cross-Tab Coordination', () => {
       data: {
         success: true,
         data: {
-          accessToken: 'broadcast-access-token-123',
+          accessToken: 'secret-in-memory-access-token-123',
           refreshToken: null,
           tokenType: 'Bearer',
           expiresIn: 900,
@@ -208,8 +208,10 @@ describe('HTTP Client & Cross-Tab Coordination', () => {
       expect(firstCall).toBeDefined();
       const broadcastData = firstCall![0];
       expect(broadcastData.type).toBe('REFRESH_SUCCESS');
-      expect(broadcastData.accessToken).toBe('broadcast-access-token-123');
-      expect(broadcastData.refreshToken).toBeUndefined(); // NEVER broadcast refresh token!
+      // CRITICAL SECURITY INVARIANT: Neither access tokens nor refresh tokens are EVER broadcast
+      expect(broadcastData.accessToken).toBeUndefined();
+      expect(broadcastData.refreshToken).toBeUndefined();
+      expect(broadcastData.refreshEpoch).toBeDefined();
     }
   });
 

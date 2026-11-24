@@ -118,6 +118,14 @@ The refresh token subsystem enforces strict single-use semantics:
 1. **Exact Single-Use**: A refresh token can be successfully consumed exactly once.
 2. **Zero Grace Window**: Any grace window recovery is removed. A revoked refresh token is NEVER accepted and NEVER returns its successor.
 3. **Immediate Family Revocation on Replay**: Any attempt to consume an already-revoked refresh token is treated as an active session compromise signal. The server immediately revokes the **entire token family**:
+
+> [!IMPORTANT]
+> **Replay Detection Scope & Security Boundaries**:
+> Strict single-use rotation detects and neutralizes the reuse of an **already-consumed** refresh token: any presentation of a rotated token invalidates the entire token family, quarantining the compromised session. However, single-use rotation inherently cannot prevent a stolen unconsumed bearer token from being used *before* the legitimate user presents it (a fundamental characteristic of all bearer-token schemes). SAVDOCRM mitigates pre-consumption theft through layered defense-in-depth:
+> 1. `HttpOnly` and `SameSite=Lax` cookie flags preventing JavaScript/XSS extraction.
+> 2. Cookie path restriction (`Path=/api/v1/auth`).
+> 3. Short access token TTL (15 minutes) kept strictly in memory.
+> 4. Continuous live account, tenant, and membership status validation on every request.
    ```sql
    UPDATE refresh_tokens SET revoked = true, revoked_at = now(), revoked_reason = 'Token reuse detected' WHERE token_family = :family;
    ```
@@ -174,8 +182,9 @@ sequenceDiagram
 2. **Post-Acquisition Verification:**
    - After acquiring the lock, a waiting tab inspects `useAuthStore.getState().accessToken` and the shared session epoch. If another tab already rotated the token, it reuses the fresh in-memory access token without sending any network request.
 3. **BroadcastChannel Synchronization (`savdocrm_auth_channel`):**
-   - A successful refresh emits `REFRESH_SUCCESS` carrying the new `accessToken` and `activeTenant`.
-   - **Critical Security Invariant**: The `refreshToken` is **NEVER** broadcast over `BroadcastChannel`. It remains exclusively in the browser's HttpOnly cookie jar.
+   - A successful refresh emits a non-token `REFRESH_SUCCESS` notification carrying only `{ type: 'REFRESH_SUCCESS', refreshEpoch, timestamp }`.
+   - **Critical Security Invariant**: **NEITHER access tokens NOR refresh tokens are EVER transmitted over `BroadcastChannel`.** Access tokens remain strictly in memory per tab; refresh tokens remain exclusively in the browser's HttpOnly cookie jar.
+   - Waiting tabs acquire the Web Lock sequentially and perform their own HTTP refresh using the newly updated HttpOnly cookie, safely acquiring their own valid in-memory access token without ever sending a consumed token.
    - A failed refresh emits `AUTH_CLEARED`, immediately wiping state and clearing queries across all tabs.
 4. **Missed Broadcast Defense, Storage Event Synchronization & Zero Token Persistence:**
    - A non-token shared session metadata record is maintained in `localStorage` (`savdocrm_session_state: { state: 'AUTHENTICATED' | 'UNAUTHENTICATED', timestamp, refreshEpoch }`).

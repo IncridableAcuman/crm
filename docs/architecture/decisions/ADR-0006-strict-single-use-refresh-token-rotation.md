@@ -13,7 +13,7 @@
   3. **Immediate Family Revocation on Replay**: Any presentation of an already-revoked refresh token is treated as an active session hijacking signal and immediately invalidates the entire `token_family` in PostgreSQL with row-level locking (`PESSIMISTIC_WRITE`).
   4. **Intentional Lost Response Behavior**: If the server commits token rotation but the HTTP response is lost over the network, retrying the old token is considered reuse and triggers full family revocation. The user must re-authenticate. This is an intentional security-first trade-off prioritizing compromise quarantine over transient network recovery.
   5. **Decommissioning of Token Encryption**: Encrypted successor token fields (`successor_token_encrypted`) and `TokenEncryptionService` are removed via a safe Liquibase migration (`v1.0.0-07-remove-successor-token-encrypted.xml`). The cryptographic hash of the successor (`successor_token_hash`) is preserved for forensic lineage tracking.
-  6. **Frontend Mutual Exclusion**: Cross-tab concurrency is handled client-side using the **Web Locks API** (`navigator.locks.request('savdocrm_refresh_lock')`) and **BroadcastChannel** (`savdocrm_auth_channel`). Only one tab initiates rotation; peer tabs wait for the lock, detect the refreshed access token, and avoid redundant server requests. Crashed tabs automatically release browser locks.
+  6. **Frontend Mutual Exclusion**: Cross-tab concurrency is handled client-side using the **Web Locks API** (`navigator.locks.request('savdocrm_refresh_lock')`) and **BroadcastChannel** (`savdocrm_auth_channel`). Only one tab initiates rotation; peer tabs wait for the lock and sequentially refresh their own in-memory access tokens using the updated HttpOnly cookie. Crashed tabs automatically release browser locks. **Neither access tokens nor refresh tokens are EVER transmitted over BroadcastChannel.**
   7. **Missed Broadcast Defense**: A non-token shared session metadata marker in `localStorage` (`savdocrm_session_state`) prevents any tab from reusing stale in-memory tokens or firing invalid refreshes if it was asleep during a broadcast.
   8. **Zero Token Persistence**: Neither access tokens nor refresh tokens are EVER stored in `localStorage` or `sessionStorage`. Refresh tokens are stored exclusively in HttpOnly cookies, and access tokens in memory.
   9. **Trusted Reverse Proxy IP Verification**: `ClientIpResolver` ensures `X-Forwarded-For` is only parsed when the connection originates from configured trusted reverse proxies (`security.trusted-proxies`).
@@ -22,9 +22,9 @@
 
 - **Consequences**:
   - *Positive*:
-    - Eliminates replay vulnerability during grace windows.
+    - Eliminates replay vulnerability during grace windows and detects/neutralizes reuse of any consumed token. (Note: Single-use rotation detects and neutralizes token reuse after consumption; it does not eliminate the risk of a stolen active bearer refresh token being used before the legitimate client presents it, which is guarded via HttpOnly cookies, path scoping, and live account status checks).
     - Removes sensitive encrypted token ciphertext from PostgreSQL storage.
     - Strong transactional consistency through row-level locking and atomic family revocation (`noRollbackFor = BadCredentialsException.class`).
-    - Eliminates multi-tab race conditions through native Web Locks API.
+    - Eliminates multi-tab race conditions through native Web Locks API without inter-tab token leakage.
   - *Negative*:
     - Severe network drops after server commit require re-login (intentional security-first trade-off).

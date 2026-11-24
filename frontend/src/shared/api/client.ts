@@ -78,13 +78,8 @@ try {
   if (typeof BroadcastChannel !== 'undefined') {
     authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
     authChannel.onmessage = (event) => {
-      if (event.data?.type === 'REFRESH_SUCCESS' && event.data.accessToken) {
-        useAuthStore.getState().setAccessToken(event.data.accessToken);
-        if (event.data.activeTenant) {
-          useAuthStore.getState().setActiveTenant(event.data.activeTenant);
-        }
-        processQueue(null, event.data.accessToken);
-      } else if (event.data?.type === 'AUTH_CLEARED') {
+      // SECURITY GUARANTEE: Neither access tokens nor refresh tokens are EVER received or accepted via BroadcastChannel
+      if (event.data?.type === 'AUTH_CLEARED') {
         useAuthStore.getState().clearAuth();
         queryClient.clear();
         processQueue(new Error('Session terminated by another tab'), null);
@@ -175,8 +170,6 @@ export async function executeCoordinatedRefresh(): Promise<string> {
     throw new Error('Session terminated by another tab');
   }
 
-  const initialEpoch = initialSharedState?.refreshEpoch ?? 0;
-
   const performHttpRefresh = async (): Promise<string> => {
     // Check 1: Did another tab refresh and update in-memory access token while we waited for the lock?
     const latestToken = useAuthStore.getState().accessToken;
@@ -192,14 +185,10 @@ export async function executeCoordinatedRefresh(): Promise<string> {
       throw new Error('Session terminated by another tab');
     }
 
-    // Check 3: If epoch advanced while waiting for lock, another tab completed refresh!
-    if (currentSharedState && currentSharedState.refreshEpoch > initialEpoch) {
-      // Yield microtask to allow any queued BroadcastChannel onmessage handler to update in-memory store
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      const updatedToken = useAuthStore.getState().accessToken;
-      if (updatedToken && updatedToken !== currentToken) {
-        return updatedToken;
-      }
+    // Check 3: If in-memory token was already updated (e.g. by concurrent operation), return it
+    const updatedToken = useAuthStore.getState().accessToken;
+    if (updatedToken && updatedToken !== currentToken) {
+      return updatedToken;
     }
 
     // This tab is the elected refresher: make the single HTTP request to rotate the token
@@ -225,14 +214,13 @@ export async function executeCoordinatedRefresh(): Promise<string> {
       refreshEpoch: nextEpoch,
     });
 
-    // Broadcast new access token to all peer tabs (REFRESH TOKEN IS NEVER BROADCAST)
+    // Broadcast non-token synchronization event to peer tabs (NEITHER ACCESS NOR REFRESH TOKENS ARE BROADCAST)
     try {
       if (authChannel) {
         authChannel.postMessage({
           type: 'REFRESH_SUCCESS',
-          accessToken: newAuth.accessToken,
-          activeTenant: newAuth.activeTenant,
           refreshEpoch: nextEpoch,
+          timestamp: Date.now(),
         });
       }
     } catch {

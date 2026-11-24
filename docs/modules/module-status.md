@@ -58,7 +58,8 @@ This document tracks the implementation status of all business and technical mod
   - Concurrency & Row-Level Locking: `RefreshTokenRepository.findByTokenHashWithLock` uses `PESSIMISTIC_WRITE` row locks (`SELECT ... FOR UPDATE`), serializing concurrent refresh attempts and guaranteeing transactional consistency (`noRollbackFor = BadCredentialsException.class`).
   - Frontend Cross-Tab Coordination:
     - Web Locks API (`savdocrm_refresh_lock`): Mutually exclusive refresh across all tabs. Crashed tabs automatically release browser locks.
-    - BroadcastChannel (`savdocrm_auth_channel`): Propagates `REFRESH_SUCCESS` (with `accessToken`, never `refreshToken`) and `AUTH_CLEARED`.
+    - BroadcastChannel (`savdocrm_auth_channel`): Propagates non-token `REFRESH_SUCCESS` and `AUTH_CLEARED` events. **Neither access tokens nor refresh tokens are EVER broadcast.**
+    - Waiting Tab Synchronization: Waiting tabs acquire the Web Lock sequentially and perform their own HTTP refresh using the newly updated HttpOnly cookie, safely acquiring valid in-memory access tokens without sending consumed tokens.
     - Missed broadcast protection & storage events: Non-token session metadata in `localStorage` (`savdocrm_session_state`) prevents using stale in-memory tokens if a background tab missed a broadcast; `window.addEventListener('storage')` immediately syncs session termination across all tabs.
     - Synchronized Login/Logout Lifecycle: `authApi.login` and `authApi.register` restore `AUTHENTICATED` state, while `authApi.logout` atomically purges in-memory auth, clears React Query cache, sets `UNAUTHENTICATED`, and broadcasts `AUTH_CLEARED`.
     - Fallback: in-tab single-flight queue for environments without Web Locks API.

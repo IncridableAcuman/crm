@@ -6,7 +6,7 @@ SAVDOCRM implements a stateless **Dual-Phase JWT Authentication Architecture** d
 - **Access Token**: Stored strictly in-memory (Zustand state); never persisted to `localStorage` or `sessionStorage`. Valid for 15 minutes.
 - **Refresh Token**: Stored in a browser-managed `HttpOnly`, `Secure` (in production), `SameSite=Lax` cookie (`savdocrm_refresh_token`) scoped to `/api/v1/auth`. Valid for 30 days. Never exposed to client JavaScript.
 - **Concurrency & Locking**: `RefreshTokenRepository.findByTokenHashWithLock` uses PostgreSQL `PESSIMISTIC_WRITE` row locks (`SELECT ... FOR UPDATE`) to serialize concurrent refresh calls.
-- **Concurrency Grace Window**: A 10-second rotation grace window prevents race conditions from multiple browser tabs while revoking the entire session family if replayed outside the window.
+- **Strict Single-Use Token Rotation (Zero Grace Window)**: Strict single-use rotation consumes refresh tokens exactly once. Any replay of an already-consumed token immediately revokes the entire token family in PostgreSQL. Cross-tab concurrency is coordinated via the browser Web Locks API (`savdocrm_refresh_lock`), ensuring no race conditions or grace window replay vulnerabilities.
 - **Live Account Status**: Every tenant-scoped request executes live database verification in `JwtAuthenticationFilter` confirming `user.isActive()`, `tenant.isActive()`, `membership.isActive()`, and membership claim consistency before setting `TenantContextHolder`.
 
 
