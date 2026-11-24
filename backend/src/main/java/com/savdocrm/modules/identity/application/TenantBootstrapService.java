@@ -99,35 +99,7 @@ public class TenantBootstrapService {
     public TenantBootstrapResult bootstrapExistingTenantOwner(UUID tenantId, UUID targetMembershipId, UUID actorUserId) {
         log.info("Attempting bootstrap for existing tenant: {} by actor: {}", tenantId, actorUserId);
 
-        // 1. Concurrency-safe pessimistic write lock on parent tenant row
-        Tenant tenant = tenantRepository.findByIdWithLock(tenantId)
-                .orElseThrow(() -> new IllegalArgumentException("Tenant not found with ID: " + tenantId));
-
-        if (!tenant.isActive()) {
-            throw new IllegalStateException("Cannot bootstrap an inactive or suspended tenant: " + tenantId);
-        }
-
-        // 2. Re-evaluate eligible OWNER count under exclusive row lock
-        long existingOwnerCount = userRoleAssignmentRepository.countEligibleOwners(tenantId, null, null, null);
-        if (existingOwnerCount > 0) {
-            log.info("Tenant {} is already bootstrapped ({} eligible active owners present). No-op.", tenantId, existingOwnerCount);
-            return TenantBootstrapResult.ALREADY_BOOTSTRAPPED;
-        }
-
-        // 3. Security Check: Ordinary ADMIN users cannot bootstrap themselves to OWNER
-        if (actorUserId != null) {
-            TenantMembership actorMembership = tenantMembershipRepository.findByTenantIdAndUserId(tenantId, actorUserId).orElse(null);
-            if (actorMembership != null) {
-                // If actor is just a regular member of the tenant (and not the original tenant creator),
-                // check if they are trying to self-elevate
-                boolean isCreator = Objects.equals(tenant.getCreatedBy(), actorUserId);
-                if (!isCreator) {
-                    throw new TenantBootstrapNotAllowedException("Ordinary tenant users/administrators cannot bootstrap or self-elevate to OWNER.");
-                }
-            }
-        }
-
-        // 4. Validate target membership
+        // 1. Validate target membership
         TenantMembership targetMembership = tenantMembershipRepository.findById(targetMembershipId)
                 .orElseThrow(() -> new InactiveMembershipException("Target membership not found: " + targetMembershipId));
 
@@ -139,11 +111,42 @@ public class TenantBootstrapService {
             throw new InactiveMembershipException("Target membership must be ACTIVE.");
         }
 
-        User user = userRepository.findById(targetMembership.getUserId())
+        // 2. Lock target user row first (canonical lock order: User -> Tenant)
+        User user = userRepository.findByIdWithLock(targetMembership.getUserId())
                 .orElseThrow(() -> new IllegalStateException("Underlying user not found: " + targetMembership.getUserId()));
 
         if (!user.isActive()) {
             throw new IllegalStateException("Underlying user is not ACTIVE.");
+        }
+
+        // 3. Concurrency-safe pessimistic write lock on parent tenant row
+        Tenant tenant = tenantRepository.findByIdWithLock(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant not found with ID: " + tenantId));
+
+        if (!tenant.isActive()) {
+            throw new IllegalStateException("Cannot bootstrap an inactive or suspended tenant: " + tenantId);
+        }
+
+        // 4. Re-evaluate eligible OWNER count under exclusive row lock
+        long existingOwnerCount = userRoleAssignmentRepository.countEligibleOwners(tenantId, null, null, null);
+        if (existingOwnerCount > 0) {
+            log.info("Tenant {} is already bootstrapped ({} eligible active owners present). No-op.", tenantId, existingOwnerCount);
+            return TenantBootstrapResult.ALREADY_BOOTSTRAPPED;
+        }
+
+        // 5. Strict Authorization Check: Ordinary users/administrators cannot bootstrap or self-elevate
+        if (actorUserId != null) {
+            if (tenant.getCreatedBy() == null || !Objects.equals(tenant.getCreatedBy(), actorUserId)) {
+                throw new TenantBootstrapNotAllowedException("Ordinary tenant users/administrators cannot bootstrap or self-elevate to OWNER.");
+            }
+            if (!Objects.equals(targetMembership.getUserId(), actorUserId)) {
+                throw new TenantBootstrapNotAllowedException("Tenant creator can only bootstrap their own membership to OWNER.");
+            }
+        } else {
+            // In system context (actorUserId == null), target membership must belong to the tenant creator if recorded
+            if (tenant.getCreatedBy() != null && !Objects.equals(targetMembership.getUserId(), tenant.getCreatedBy())) {
+                throw new TenantBootstrapNotAllowedException("Bootstrap must assign OWNER to the tenant creator's membership.");
+            }
         }
 
         // 5. Ensure system roles exist for this tenant

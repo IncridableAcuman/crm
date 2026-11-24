@@ -109,6 +109,21 @@ public class RoleAssignmentService {
             throw new IllegalArgumentException("Cannot assign an inactive role: " + role.getCode());
         }
 
+        // When assigning OWNER, coordinate with global user suspension via canonical lock order (User -> Tenant)
+        if (role.isOwner()) {
+            User lockedUser = userRepository.findByIdWithLock(targetMembership.getUserId())
+                    .orElseThrow(() -> new IllegalStateException("Underlying user not found: " + targetMembership.getUserId()));
+            if (!lockedUser.isActive()) {
+                throw new InactiveMembershipException("Cannot assign roles to a globally suspended or inactive user.");
+            }
+
+            Tenant lockedTenant = tenantRepository.findByIdWithLock(command.tenantId())
+                    .orElseThrow(() -> new IllegalArgumentException("Tenant not found with ID: " + command.tenantId()));
+            if (!lockedTenant.isActive()) {
+                throw new IllegalStateException("Cannot assign roles in an inactive or suspended tenant.");
+            }
+        }
+
         // 5. Validate Branch if Branch-Scoped
         if (command.scopeType() == RoleScopeType.BRANCH) {
             Branch branch = branchRepository.findByTenantIdAndId(command.tenantId(), command.branchId())

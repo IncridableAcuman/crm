@@ -47,7 +47,8 @@ public class UserService {
     public void suspendGlobalUser(UUID targetUserId) {
         log.info("Request to suspend global user: {}", targetUserId);
 
-        User user = userRepository.findById(targetUserId)
+        // 1. Lock the global user row first to serialize against concurrent OWNER assignments
+        User user = userRepository.findByIdWithLock(targetUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found with ID: " + targetUserId));
 
         if (user.getStatus() == UserStatus.SUSPENDED) {
@@ -91,7 +92,8 @@ public class UserService {
     public void activateGlobalUser(UUID targetUserId) {
         log.info("Activating global user: {}", targetUserId);
 
-        User user = userRepository.findById(targetUserId)
+        // 1. Lock the global user row during activation
+        User user = userRepository.findByIdWithLock(targetUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found with ID: " + targetUserId));
 
         user.activate();

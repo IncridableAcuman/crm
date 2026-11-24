@@ -27,7 +27,7 @@ import lombok.Setter;
 @AllArgsConstructor
 public class Role extends BaseTenantEntity {
 
-    @Column(name = "code", nullable = false, length = 50)
+    @Column(name = "code", nullable = false, updatable = false, length = 50)
     private String code;
 
     @Column(name = "name", nullable = false, length = 100)
@@ -36,7 +36,7 @@ public class Role extends BaseTenantEntity {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
-    @Column(name = "is_system", nullable = false)
+    @Column(name = "is_system", nullable = false, updatable = false)
     @Builder.Default
     private boolean isSystem = false;
 

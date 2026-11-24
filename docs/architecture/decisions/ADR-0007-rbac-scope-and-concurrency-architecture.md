@@ -29,7 +29,11 @@
        4. `roles.code = 'OWNER'` AND `roles.is_active = true`
        5. `user_role_assignments.is_active = true`
        6. `user_role_assignments.scope_type = 'TENANT'`
-     - **Multi-Tenant Global User Suspension**: When a global user is suspended, M04.3 queries all active tenants where the user holds an active OWNER assignment, sorts the tenant UUIDs in deterministic ascending alphanumeric order (`ORDER BY tenant_id ASC`) to eliminate deadlocks, acquires row-level locks on parent `tenants` rows in sequence, re-evaluates eligible owner counts inside the locked transactions, and aborts with `LastActiveOwnerException` if ANY active tenant would be left without an eligible owner.
+     - **Multi-Tenant Global User Suspension & Canonical Lock Order (User -> Tenant)**:
+       - To serialize global user suspension against concurrent OWNER role assignments without deadlocks, SAVDOCRM enforces a strict global lock hierarchy: **`User` (by userId) FIRST, then `Tenant` (by tenantId in ascending alphanumeric order) SECOND**.
+       - `UserService.suspendGlobalUser(userId)` acquires a `PESSIMISTIC_WRITE` lock on the global `users` row first, queries active tenants where the user is an eligible OWNER, sorts tenant UUIDs in ascending order, locks each tenant row sequentially, re-evaluates the 6-predicate count, and aborts with `LastActiveOwnerException` if ANY active tenant would be left without an eligible owner.
+       - `RoleAssignmentService.assignRole` (when assigning OWNER) and `TenantBootstrapService.bootstrapExistingTenantOwner` acquire a `PESSIMISTIC_WRITE` lock on the target `users` row first, verify the user is ACTIVE, and then acquire a `PESSIMISTIC_WRITE` lock on the parent `tenants` row.
+       - This eliminates the race condition where a global user is suspended while concurrently receiving an OWNER assignment that leaves an active tenant without an eligible owner.
   4. **Request-Scoped Memoization (No Persistent Cache)**:
      - For Milestone 04, permissions are queried from PostgreSQL and memoized strictly within the scope of a single HTTP request (`HttpServletRequest` attribute).
      - Because indexed queries on `(tenant_id, membership_id, is_active)` take < 0.5ms in PostgreSQL 16, this approach achieves sub-millisecond latency without persistent caching overhead.
