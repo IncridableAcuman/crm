@@ -6,7 +6,11 @@ import { HomePage } from '@/pages/home/HomePage';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { TenantSelectPage } from '@/pages/auth/TenantSelectPage';
+import { BranchesPage } from '@/pages/branches/BranchesPage';
+import { RolesPage } from '@/pages/roles/RolesPage';
+import { RoleAssignmentsPage } from '@/pages/assignments/RoleAssignmentsPage';
 import { ProtectedRoute } from '@/app/routes/ProtectedRoute';
+import { AppLayout } from '@/widgets/layout/AppLayout';
 
 export const App: React.FC = () => {
   return (
@@ -25,8 +29,13 @@ export const App: React.FC = () => {
 
             {/* Fully protected routes requiring active tenant store */}
             <Route element={<ProtectedRoute requireTenant={true} />}>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/dashboard" element={<HomePage />} />
+              <Route element={<AppLayout />}>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/dashboard" element={<HomePage />} />
+                <Route path="/branches" element={<BranchesPage />} />
+                <Route path="/roles" element={<RolesPage />} />
+                <Route path="/assignments" element={<RoleAssignmentsPage />} />
+              </Route>
             </Route>
 
             {/* Fallback */}
