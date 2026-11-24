@@ -188,16 +188,29 @@ Binds a role to a tenant membership with explicit scope parameters.
 
 ## 5. Built-in Role Templates & Permission Catalog
 
-### 5.1 System Roles vs. Custom Roles Lifecycle
+### 5.1 System Roles vs. Custom Roles Lifecycle & Enforcement Layers
 
 | Dimension | System Roles (`is_system = true`) | Custom Roles (`is_system = false`) |
 | :--- | :--- | :--- |
 | **Origin** | Seeded automatically on tenant provisioning | Created by tenant administrators with `identity.roles.manage` |
 | **Role Codes** | `OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, `WAREHOUSE_MANAGER`, `ACCOUNTANT`, `VIEWER` | Tenant-defined (alphanumeric, uppercase, e.g. `SHIFT_SUPERVISOR`) |
 | **Code Mutability** | **Immutable** — Cannot be renamed | Mutable before assignment / immutable code after creation |
-| **Deletability** | **Prohibited** — Can never be deleted (`DELETE` returns 400/403) | Allowed if no active assignments reference the role |
+| **Deletability** | **Prohibited** — Can never be deleted (`DELETE` returns 400/403) | Allowed only if 0 assignments exist (`fk_assignments_role` RESTRICT) |
 | **Permission Mutability** | **Immutable** for `OWNER` (always holds all permissions). Read-only for standard system roles in M04 to prevent policy drift. | Fully customizable via `PUT /api/v1/roles/{id}/permissions` |
 | **Scope Applicability** | Pre-configured defaults (`OWNER`/`ADMIN` -> `TENANT`; `MANAGER`/`CASHIER` -> `BRANCH`) | Assigned as `TENANT` or `BRANCH` at assignment time |
+
+#### Architectural Distinction: Database Guarantees vs. Application-Level Enforcement
+1. **Database-Level Protection**:
+   - `roles.code` uniqueness per tenant (`uq_roles_tenant_code`).
+   - Composite foreign key integrity (`uq_roles_tenant_id` ensuring tenant isolation).
+   - Foreign key delete restriction (`fk_assignments_role ON DELETE RESTRICT` preventing physical deletion of any role that has active or historical assignments).
+2. **Application-Level Protection (Domain Service Layer)**:
+   - The `is_system` column is a database-persisted boolean flag. The database storage engine itself does not contain procedural triggers or row-level security blocking direct SQL `UPDATE` or `DELETE` on system roles.
+   - **Enforcement Layer Responsibility**: Application services (`RoleService`, `AuthorizationService` in M04.4) explicitly enforce immutability:
+     - `updateRole`: Rejects code rename or parameter modification for roles where `is_system == true`.
+     - `deleteRole`: Explicitly rejects deletion for roles where `is_system == true` with `SystemRoleImmutableException` (HTTP 400/403).
+     - `updateRolePermissions`: Rejects permission alteration on system role templates.
+   - **Trigger Avoidance Rationale**: Database triggers are deliberately avoided for the modular monolith MVP. Triggers obscure business rules in database-specific procedural code, impede automated testing with standard ORM fixtures, complicate Liquibase migrations and rollbacks, and distribute authorization logic across disparate runtime tiers. Application-level enforcement keeps all domain invariants explicit, testable, and maintainable.
 
 ### 5.2 Privilege Escalation Prevention (Guards)
 To eliminate administrative privilege escalation vulnerabilities:
@@ -251,12 +264,14 @@ The system catalog uses the strictly canonical `<module>.<resource>.<action>` do
 | `system` | `settings` | `manage` | `system.settings.manage` | Modify store configuration and system settings | OWNER |
 
 ### 5.4 Permission Catalog Lifecycle & Evolution
-- **Master Authority**: The `permissions` table is populated strictly by system Liquibase migrations (`v1.0.0-13-seed-permissions-catalog.xml`). Tenant administrators cannot insert, update, or delete rows in `permissions`.
+- **Master Authority**: The `permissions` table is populated strictly by system Liquibase migrations (`v1.0.0-13-seed-permissions-catalog.xml`). Tenant administrators cannot insert, update, or delete rows in `permissions` (no public REST mutation endpoints exist for the permission catalog).
 - **Naming Convention Enforced by DB**: The `chk_permissions_code_format` constraint physically guarantees `code = module || '.' || resource || '.' || action`.
+- **Database Protection Against Deletion**: Foreign key constraint `fk_role_permissions_perm` enforces `ON DELETE RESTRICT`. A permission cannot be deleted while referenced by any role across any tenant.
+- **Deprecation Lifecycle**: If a capability becomes obsolete in future versions, it is never physically deleted. It is marked as deprecated or inactive in the catalog, remaining in `permissions` for historical lineage and audit integrity.
 - **Future Milestone Evolution**:
   - When new modules are implemented (e.g., Warehouse Management, Loyalty), new permissions are introduced via versioned Liquibase changesets.
-  - New permissions are automatically added to the immutable `OWNER` role for all existing tenants via migration scripts.
-  - New permissions are never automatically granted to existing custom roles (preserving least privilege).
+  - New permissions are automatically added **exclusively to the immutable `OWNER` role** for all existing tenants via migration scripts.
+  - New permissions are **never automatically granted to existing custom roles**, strictly upholding the principle of least privilege. Custom roles require explicit administrative reconfiguration to receive newly introduced capabilities.
 
 ---
 
@@ -281,6 +296,7 @@ The Liquibase migration suite in `backend/src/main/resources/db/changelog/` exec
 13. `12-create-user-role-assignments.xml`: User role assignments with composite FKs, scope constraints, and partial unique indexes
 14. `13-seed-permissions-catalog.xml`: Seeds the 33 canonical system permissions
 15. `14-seed-system-roles.xml`: Seeds 7 system roles and permission associations for all existing tenants
+16. `15-harden-rbac-foreign-keys.xml`: Hardens `fk_role_permissions_perm`, `fk_assignments_role`, and `fk_assignments_branch` to `ON DELETE RESTRICT` to preserve historical audit records and catalog integrity
 
 ### 6.2 Liquibase Physical DDL Definition
 
@@ -333,7 +349,7 @@ CREATE TABLE role_permissions (
     CONSTRAINT uq_role_permissions_role_perm UNIQUE (role_id, permission_id),
     CONSTRAINT fk_role_permissions_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
     CONSTRAINT fk_role_permissions_role FOREIGN KEY (tenant_id, role_id) REFERENCES roles(tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT fk_role_permissions_perm FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+    CONSTRAINT fk_role_permissions_perm FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE RESTRICT
 );
 CREATE INDEX idx_role_permissions_role ON role_permissions(role_id);
 CREATE INDEX idx_role_permissions_perm ON role_permissions(permission_id);
@@ -361,8 +377,8 @@ CREATE TABLE user_role_assignments (
     ),
     CONSTRAINT fk_assignments_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
     CONSTRAINT fk_assignments_membership FOREIGN KEY (tenant_id, membership_id) REFERENCES tenant_memberships(tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT fk_assignments_role FOREIGN KEY (tenant_id, role_id) REFERENCES roles(tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT fk_assignments_branch FOREIGN KEY (tenant_id, branch_id) REFERENCES branches(tenant_id, id) ON DELETE CASCADE
+    CONSTRAINT fk_assignments_role FOREIGN KEY (tenant_id, role_id) REFERENCES roles(tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT fk_assignments_branch FOREIGN KEY (tenant_id, branch_id) REFERENCES branches(tenant_id, id) ON DELETE RESTRICT
 );
 
 -- Partial unique indexes: tailored for TENANT and BRANCH scopes
@@ -382,6 +398,32 @@ CREATE INDEX idx_assignments_tenant ON user_role_assignments(tenant_id);
 ```
 
 ### 6.3 Assignment Uniqueness Strategy Evaluation
+
+We evaluated three architectural approaches to enforce assignment uniqueness:
+1. **Sentinel COALESCE**: `COALESCE(branch_id, '00000000-0000-0000-0000-000000000000'::uuid)`. Requires expression indexing, introduces synthetic dummy values, and prevents clean index scans.
+2. **PostgreSQL NULLS NOT DISTINCT**: `UNIQUE (tenant_id, membership_id, role_id, scope_type, branch_id) NULLS NOT DISTINCT`. While valid in PostgreSQL 15+, it couples tenant-wide and branch-scoped lookups into a single large index structure.
+3. **Dual Partial Unique Indexes (Selected Architecture)**:
+   - `uq_assignments_active_tenant` on `(tenant_id, membership_id, role_id)` WHERE `is_active = true AND scope_type = 'TENANT'`.
+   - `uq_assignments_active_branch` on `(tenant_id, membership_id, role_id, branch_id)` WHERE `is_active = true AND scope_type = 'BRANCH'`.
+   - **Rationale**: Completely eliminates NULL ambiguity, aligns 1:1 with query access patterns (`hasPermission` checks scan tenant index; `hasBranchPermission` checks scan branch index), produces smaller index footprints, and provides clear constraint violation error reporting.
+
+### 6.4 Comprehensive Foreign Key Deletion Policy Matrix
+
+Every foreign key relationship across IAM and Tenancy is governed by an explicit deletion policy balancing audit trail preservation and tenant decommissioning:
+
+| Foreign Key | Source Table -> Target Table | Delete Action | Architectural Rationale & Audit Lineage Policy |
+| :--- | :--- | :--- | :--- |
+| `fk_branches_tenant` | `branches(tenant_id) -> tenants(id)` | `CASCADE` | Hard tenant deletion removes all store branches belonging to that tenant. |
+| `fk_memberships_tenant` | `tenant_memberships(tenant_id) -> tenants(id)` | `CASCADE` | Hard tenant deletion removes all membership associations for the tenant. |
+| `fk_memberships_user` | `tenant_memberships(user_id) -> users(id)` | `CASCADE` | Global user hard deletion (GDPR erasure) purges tenant memberships. Everyday lifecycle uses `status = 'SUSPENDED'`. |
+| `fk_roles_tenant` | `roles(tenant_id) -> tenants(id)` | `CASCADE` | Hard tenant deletion removes all tenant roles. |
+| `fk_role_permissions_tenant`| `role_permissions(tenant_id) -> tenants(id)` | `CASCADE` | Hard tenant deletion removes all tenant role-permission mappings. |
+| `fk_role_permissions_role` | `role_permissions(tenant_id, role_id) -> roles(tenant_id, id)` | `CASCADE` | Role permissions are configuration associations without independent lifecycle; deleting an unassigned role cleans up its permissions. |
+| `fk_role_permissions_perm` | `role_permissions(permission_id) -> permissions(id)` | `RESTRICT` | System permissions are global immutable catalog definitions. A permission cannot be deleted while referenced by any role. |
+| `fk_assignments_tenant` | `user_role_assignments(tenant_id) -> tenants(id)` | `CASCADE` | Hard tenant deletion removes all role assignments. |
+| `fk_assignments_membership` | `user_role_assignments(tenant_id, membership_id) -> tenant_memberships(tenant_id, id)` | `CASCADE` | Allows clean cascading when a tenant or user is deleted. Normal membership suspension uses `status = 'SUSPENDED'`, leaving assignments intact. |
+| `fk_assignments_role` | `user_role_assignments(tenant_id, role_id) -> roles(tenant_id, id)` | `RESTRICT` | **Audit History Preservation**: Prevents physical deletion of any role that has active or historical assignments. Roles must be soft-deactivated (`is_active = false`). Only unused roles can be deleted. |
+| `fk_assignments_branch` | `user_role_assignments(tenant_id, branch_id) -> branches(tenant_id, id)` | `RESTRICT` | **Audit History Preservation**: Prevents physical deletion of any branch with role assignments. Branches must be soft-deactivated (`is_active = false`). |
 
 We evaluated three architectural approaches to enforce assignment uniqueness:
 1. **Sentinel COALESCE**: `COALESCE(branch_id, '00000000-0000-0000-0000-000000000000'::uuid)`. Requires expression indexing, introduces synthetic dummy values, and prevents clean index scans.
@@ -442,28 +484,65 @@ When evaluating `@authorizationService.hasBranchPermission(permissionCode, branc
 
 ## 9. Concurrency-Safe Last Active Owner Protection & Existing Tenant Bootstrap
 
-### 9.1 Concurrency-Safe Locking Strategy
-Any operation capable of reducing the count of active owners for a tenant must acquire an exclusive row-level lock on the **parent `Tenant` row** (`SELECT * FROM tenants WHERE id = :tenantId FOR UPDATE;` / `@Lock(LockModeType.PESSIMISTIC_WRITE)`):
+### 9.1 Concurrency-Safe Locking Strategy & Eligible Owner Invariant
+Any operation capable of reducing the count of active owners for a tenant must acquire an exclusive row-level lock on the **parent `Tenant` row** (`SELECT * FROM tenants WHERE id = :tenantId FOR UPDATE;` / `@Lock(LockModeType.PESSIMISTIC_WRITE)`).
+
+An identity is an **eligible active OWNER** if and only if all six conditions are satisfied:
+1. `Tenant` status is `ACTIVE`
+2. `TenantMembership` status is `ACTIVE`
+3. Underlying global `User` status is `ACTIVE` (`u.status = 'ACTIVE'`)
+4. System role `code = 'OWNER'` is `ACTIVE` (`r.is_active = true`)
+5. Role assignment is `ACTIVE` (`a.is_active = true`)
+6. Assignment scope is store-wide (`a.scope_type = 'TENANT'`)
+
+#### Concurrency & Locking Algorithm:
 1. Lock root aggregate: `SELECT * FROM tenants WHERE id = :tenantId FOR UPDATE;`
-2. Count remaining active owners:
+2. Count remaining eligible active owners inside the locked transaction:
    ```sql
    SELECT COUNT(DISTINCT m.id)
    FROM tenant_memberships m
+   JOIN users u ON u.id = m.user_id
    JOIN user_role_assignments a ON a.membership_id = m.id AND a.tenant_id = m.tenant_id
    JOIN roles r ON r.id = a.role_id AND r.tenant_id = a.tenant_id
    WHERE m.tenant_id = :tenantId
      AND m.status = 'ACTIVE'
+     AND u.status = 'ACTIVE'
      AND r.code = 'OWNER'
+     AND r.is_active = true
      AND a.is_active = true
-     AND a.id != :targetAssignmentId;
+     AND a.scope_type = 'TENANT'
+     AND (:targetMembershipId IS NULL OR m.id != :targetMembershipId)
+     AND (:targetAssignmentId IS NULL OR a.id != :targetAssignmentId);
    ```
-3. If remaining active owners would be `0`, throw `LastActiveOwnerException` and roll back transaction.
-4. **Deterministic Multi-Tenant Locking**: If a global user belonging to multiple tenants is suspended, the application service in M04.3 must sort tenant IDs deterministically (`ORDER BY tenant_id ASC`), acquire parent row locks in order, and evaluate owner counts across each tenant.
+3. If remaining eligible active owners would be `0`, throw `LastActiveOwnerException` and roll back transaction.
 
-### 9.2 Existing Tenant Bootstrap Strategy
+#### Global User Suspension Protocol Across Multiple Tenants (M04.3 Requirement):
+When a global user is suspended (`PUT /api/v1/users/{id}/status` -> `SUSPENDED`):
+1. **Identify Affected Tenants**: Query all active tenants where the target user currently holds an active OWNER assignment:
+   ```sql
+   SELECT DISTINCT t.id
+   FROM tenants t
+   JOIN tenant_memberships m ON m.tenant_id = t.id
+   JOIN user_role_assignments a ON a.tenant_id = t.id AND a.membership_id = m.id
+   JOIN roles r ON r.tenant_id = t.id AND r.id = a.role_id
+   WHERE m.user_id = :targetUserId
+     AND t.status = 'ACTIVE'
+     AND m.status = 'ACTIVE'
+     AND r.code = 'OWNER'
+     AND r.is_active = true
+     AND a.is_active = true
+     AND a.scope_type = 'TENANT';
+   ```
+2. **Deterministic Locking Order**: Sort affected tenant UUIDs deterministically in ascending alphanumeric order (`ORDER BY t.id ASC`) to eliminate deadlock hazards when concurrent administrative operations lock multiple tenants.
+3. **Pessimistic Write Locks**: Acquire `PESSIMISTIC_WRITE` locks sequentially on each parent tenant row.
+4. **Post-Lock Evaluation**: Inside the locked transaction, re-evaluate remaining eligible active owner count for each tenant excluding the target user (`AND u.id != :targetUserId`).
+5. **Rejection Boundary**: If ANY active tenant would be left with 0 active eligible owners, reject the entire suspension request (`LastActiveOwnerException`), rolling back all locks.
+6. **Execution**: If every affected active tenant retains at least one other eligible owner, update the user status to `SUSPENDED`.
+
+### 9.2 Existing Tenant Bootstrap Strategy & Detection
 Tenants created during Milestones 01–03 do not have role assignments.
 - **Migration Guarantees**: Migration `14-seed-system-roles.xml` creates the 7 system roles for all existing tenants, but **does not invent or guess an owner identity**.
-- **Detection Query**:
+- **Canonical Detection Query (6-predicate verification)**:
   ```sql
   SELECT t.id, t.name
   FROM tenants t
@@ -471,15 +550,37 @@ Tenants created during Milestones 01–03 do not have role assignments.
     AND NOT EXISTS (
         SELECT 1
         FROM tenant_memberships m
+        JOIN users u ON u.id = m.user_id
         JOIN user_role_assignments a ON a.tenant_id = m.tenant_id AND a.membership_id = m.id
         JOIN roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id
         WHERE m.tenant_id = t.id
           AND m.status = 'ACTIVE'
+          AND u.status = 'ACTIVE'
           AND r.code = 'OWNER'
+          AND r.is_active = true
           AND a.is_active = true
+          AND a.scope_type = 'TENANT'
     );
   ```
-- **Bootstrap Requirement**: Un-bootstrapped tenants require an explicit initial OWNER assignment before authorization is granted. Future tenant registration atomically creates the creator's `TenantMembership` and `OWNER` role assignment in a single transaction.
+
+### 9.3 M04.3 Application-Level Bootstrap Contract
+1. **New Tenant Registration (Atomic Lifecycle)**:
+   - When a tenant is registered via `TenantRegistrationService`, the application executes a single atomic transaction:
+     a. Persist `Tenant` (`status = 'ACTIVE'`).
+     b. Create main `Branch` (`is_main = true`).
+     c. Seed 7 built-in system roles and permissions for the new tenant.
+     d. Create `TenantMembership` for registering user (`status = 'ACTIVE'`).
+     e. Create `UserRoleAssignment` for `OWNER` (`scope_type = 'TENANT'`, `is_active = true`).
+   - If any step fails, the entire transaction rolls back. Newly created tenants never enter an unbootstrapped state.
+2. **Existing Tenants without OWNER (Administrative Bootstrap Process)**:
+   - Existing tenants without eligible owners are detected via `TenantBootstrapService.findUnbootstrappedTenants()`.
+   - Explicit Bootstrap Procedure: A platform administrative command or initial verified tenant founder bootstrap endpoint (`POST /api/v1/system/tenants/{id}/bootstrap-owner`) assigns the initial OWNER.
+   - **Privilege Containment Guard**: Ordinary `ADMIN` users within the tenant cannot promote themselves or others to `OWNER` (enforced by the Owner Protection Guard requiring an active `OWNER` to grant `OWNER`).
+   - **Idempotency & Concurrency Safety**:
+     - Acquires `PESSIMISTIC_WRITE` lock on the target `Tenant` row.
+     - Validates that the tenant is still unbootstrapped inside the lock; if already bootstrapped, completes idempotently with no-op.
+     - Validates that the target membership is `ACTIVE` and belongs to an `ACTIVE` user.
+     - Inserts the `UserRoleAssignment` for `OWNER` at `TENANT` scope.
 
 ---
 

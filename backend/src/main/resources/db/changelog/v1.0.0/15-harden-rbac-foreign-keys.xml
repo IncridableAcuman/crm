@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-15-harden-rbac-foreign-keys" author="savdocrm-security">
+        <comment>Harden RBAC foreign keys to RESTRICT to protect audit history and permission catalog integrity</comment>
+
+        <dropForeignKeyConstraint baseTableName="role_permissions"
+                                  constraintName="fk_role_permissions_perm"/>
+
+        <addForeignKeyConstraint baseTableName="role_permissions"
+                                 baseColumnNames="permission_id"
+                                 constraintName="fk_role_permissions_perm"
+                                 referencedTableName="permissions"
+                                 referencedColumnNames="id"
+                                 onDelete="RESTRICT"/>
+
+        <dropForeignKeyConstraint baseTableName="user_role_assignments"
+                                  constraintName="fk_assignments_role"/>
+
+        <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                 baseColumnNames="tenant_id, role_id"
+                                 constraintName="fk_assignments_role"
+                                 referencedTableName="roles"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <dropForeignKeyConstraint baseTableName="user_role_assignments"
+                                  constraintName="fk_assignments_branch"/>
+
+        <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                 baseColumnNames="tenant_id, branch_id"
+                                 constraintName="fk_assignments_branch"
+                                 referencedTableName="branches"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="user_role_assignments"
+                                      constraintName="fk_assignments_branch"/>
+            <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                     baseColumnNames="tenant_id, branch_id"
+                                     constraintName="fk_assignments_branch"
+                                     referencedTableName="branches"
+                                     referencedColumnNames="tenant_id, id"
+                                     onDelete="CASCADE"/>
+
+            <dropForeignKeyConstraint baseTableName="user_role_assignments"
+                                      constraintName="fk_assignments_role"/>
+            <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                     baseColumnNames="tenant_id, role_id"
+                                     constraintName="fk_assignments_role"
+                                     referencedTableName="roles"
+                                     referencedColumnNames="tenant_id, id"
+                                     onDelete="CASCADE"/>
+
+            <dropForeignKeyConstraint baseTableName="role_permissions"
+                                      constraintName="fk_role_permissions_perm"/>
+            <addForeignKeyConstraint baseTableName="role_permissions"
+                                     baseColumnNames="permission_id"
+                                     constraintName="fk_role_permissions_perm"
+                                     referencedTableName="permissions"
+                                     referencedColumnNames="id"
+                                     onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

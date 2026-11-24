@@ -380,18 +380,22 @@ class RbacDatabaseMigrationIntegrationTest {
                 UUID.randomUUID(), tenantBId, memberB2Id, roleBOwnerId
         );
 
-        // Query identifying un-bootstrapped tenants
+        // Canonical 6-predicate query identifying un-bootstrapped tenants
         List<UUID> unbootstrappedTenants = jdbcTemplate.queryForList(
                 "SELECT t.id FROM tenants t " +
                         "WHERE t.status = 'ACTIVE' " +
                         "  AND NOT EXISTS ( " +
                         "      SELECT 1 FROM tenant_memberships m " +
+                        "      JOIN users u ON u.id = m.user_id " +
                         "      JOIN user_role_assignments a ON a.tenant_id = m.tenant_id AND a.membership_id = m.id " +
                         "      JOIN roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id " +
                         "      WHERE m.tenant_id = t.id " +
                         "        AND m.status = 'ACTIVE' " +
+                        "        AND u.status = 'ACTIVE' " +
                         "        AND r.code = 'OWNER' " +
+                        "        AND r.is_active = true " +
                         "        AND a.is_active = true " +
+                        "        AND a.scope_type = 'TENANT' " +
                         "  )",
                 UUID.class
         );
@@ -469,9 +473,10 @@ class RbacDatabaseMigrationIntegrationTest {
         Integer isUnbootstrapped = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM tenants t WHERE t.id = ? AND NOT EXISTS ( " +
                 "  SELECT 1 FROM tenant_memberships m " +
+                "  JOIN users u ON u.id = m.user_id " +
                 "  JOIN user_role_assignments a ON a.tenant_id = m.tenant_id AND a.membership_id = m.id " +
                 "  JOIN roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id " +
-                "  WHERE m.tenant_id = t.id AND m.status = 'ACTIVE' AND r.code = 'OWNER' AND a.is_active = true" +
+                "  WHERE m.tenant_id = t.id AND m.status = 'ACTIVE' AND u.status = 'ACTIVE' AND r.code = 'OWNER' AND r.is_active = true AND a.is_active = true AND a.scope_type = 'TENANT'" +
                 ")",
                 Integer.class,
                 legacyTenantId
@@ -489,13 +494,204 @@ class RbacDatabaseMigrationIntegrationTest {
         Integer remainingUnbootstrapped = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM tenants t WHERE t.id = ? AND NOT EXISTS ( " +
                 "  SELECT 1 FROM tenant_memberships m " +
+                "  JOIN users u ON u.id = m.user_id " +
                 "  JOIN user_role_assignments a ON a.tenant_id = m.tenant_id AND a.membership_id = m.id " +
                 "  JOIN roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id " +
-                "  WHERE m.tenant_id = t.id AND m.status = 'ACTIVE' AND r.code = 'OWNER' AND a.is_active = true" +
+                "  WHERE m.tenant_id = t.id AND m.status = 'ACTIVE' AND u.status = 'ACTIVE' AND r.code = 'OWNER' AND r.is_active = true AND a.is_active = true AND a.scope_type = 'TENANT'" +
                 ")",
                 Integer.class,
                 legacyTenantId
         );
         assertThat(remainingUnbootstrapped).isEqualTo(0);
+    }
+
+    // =========================================================================
+    // 7. Security Audit & Foreign Key Hardening Regression Tests
+    // =========================================================================
+
+    @Test
+    @DisplayName("Verify referenced global permission cannot be deleted (ON DELETE RESTRICT)")
+    void shouldRejectDeletingPermissionWhileReferencedInRolePermissions() {
+        // Link permission 'catalog.products.read' to roleAOwner in role_permissions
+        UUID permId = UUID.fromString("00000000-0000-4000-a000-000000000003");
+        jdbcTemplate.update(
+                "INSERT INTO role_permissions (id, tenant_id, role_id, permission_id) VALUES (?, ?, ?, ?)",
+                UUID.randomUUID(), tenantAId, roleAOwnerId, permId
+        );
+
+        // Attempting to delete a referenced permission definition must fail at DB level due to RESTRICT
+        assertThatThrownBy(() -> jdbcTemplate.update("DELETE FROM permissions WHERE id = ?", permId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // Permission remains intact
+        Integer permCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM permissions WHERE id = ?", Integer.class, permId);
+        assertThat(permCount).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Verify role with historical assignments cannot be deleted (preserves audit history)")
+    void shouldBlockDeletingRoleWithHistoricalAssignments() {
+        UUID customRoleId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+
+        // 1. Create custom role
+        jdbcTemplate.update(
+                "INSERT INTO roles (id, tenant_id, code, name, is_system, is_active) VALUES (?, ?, 'SUPERVISOR', 'Supervisor', false, true)",
+                customRoleId, tenantAId
+        );
+
+        // 2. Create assignment and revoke it (historical assignment record)
+        jdbcTemplate.update(
+                "INSERT INTO user_role_assignments (id, tenant_id, membership_id, role_id, scope_type, is_active) VALUES (?, ?, ?, ?, 'TENANT', true)",
+                assignmentId, tenantAId, memberA1Id, customRoleId
+        );
+        jdbcTemplate.update(
+                "UPDATE user_role_assignments SET is_active = false, revoked_at = CURRENT_TIMESTAMP WHERE id = ?",
+                assignmentId
+        );
+
+        // 3. Physical deletion of the role must be REJECTED by fk_assignments_role (RESTRICT)
+        assertThatThrownBy(() -> jdbcTemplate.update("DELETE FROM roles WHERE id = ?", customRoleId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 4. Historical assignment remains 100% available for security audit logs
+        Integer assignmentCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_role_assignments WHERE id = ? AND is_active = false AND revoked_at IS NOT NULL",
+                Integer.class, assignmentId
+        );
+        assertThat(assignmentCount).isEqualTo(1);
+
+        // 5. Unassigned custom role CAN be deleted cleanly
+        UUID unassignedRoleId = UUID.randomUUID();
+        jdbcTemplate.update(
+                "INSERT INTO roles (id, tenant_id, code, name, is_system, is_active) VALUES (?, ?, 'TEMP_ROLE', 'Temporary', false, true)",
+                unassignedRoleId, tenantAId
+        );
+        int deleted = jdbcTemplate.update("DELETE FROM roles WHERE id = ?", unassignedRoleId);
+        assertThat(deleted).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Verify branch with historical assignments cannot be deleted (preserves audit history)")
+    void shouldBlockDeletingBranchWithHistoricalAssignments() {
+        UUID branchId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+
+        // 1. Create branch
+        jdbcTemplate.update(
+                "INSERT INTO branches (id, tenant_id, name, code) VALUES (?, ?, 'Branch Audit Test', 'AUDIT-01')",
+                branchId, tenantAId
+        );
+
+        // 2. Create branch-scoped assignment and revoke it
+        jdbcTemplate.update(
+                "INSERT INTO user_role_assignments (id, tenant_id, membership_id, role_id, scope_type, branch_id, is_active) VALUES (?, ?, ?, ?, 'BRANCH', ?, false)",
+                assignmentId, tenantAId, memberA1Id, roleAManagerId, branchId
+        );
+
+        // 3. Physical deletion of the branch must be REJECTED by fk_assignments_branch (RESTRICT)
+        assertThatThrownBy(() -> jdbcTemplate.update("DELETE FROM branches WHERE id = ?", branchId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        // 4. Historical branch assignment remains intact
+        Integer assignmentCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_role_assignments WHERE id = ? AND branch_id = ?",
+                Integer.class, assignmentId, branchId
+        );
+        assertThat(assignmentCount).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Verify tenant deletion cascades cleanly across all child RBAC tables")
+    void shouldCascadeTenantDeletionAcrossAllRbacTablesCleanly() {
+        // Deleting tenantA must cascade delete its memberships, roles, role_permissions, branches, and assignments
+        int deletedTenants = jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", tenantAId);
+        assertThat(deletedTenants).isEqualTo(1);
+
+        // Verify child records for tenantA are removed
+        Integer rolesCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM roles WHERE tenant_id = ?", Integer.class, tenantAId);
+        Integer branchesCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM branches WHERE tenant_id = ?", Integer.class, tenantAId);
+        Integer membershipsCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tenant_memberships WHERE tenant_id = ?", Integer.class, tenantAId);
+        Integer assignmentsCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_role_assignments WHERE tenant_id = ?", Integer.class, tenantAId);
+
+        assertThat(rolesCount).isEqualTo(0);
+        assertThat(branchesCount).isEqualTo(0);
+        assertThat(membershipsCount).isEqualTo(0);
+        assertThat(assignmentsCount).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("Verify globally suspended user is not counted as eligible OWNER even with ACTIVE membership and assignment")
+    void shouldNotCountGloballyInactiveUserAsEligibleOwner() {
+        // Tenant B has Member B2 with active OWNER assignment
+        UUID assignB = UUID.randomUUID();
+        jdbcTemplate.update(
+                "INSERT INTO user_role_assignments (id, tenant_id, membership_id, role_id, scope_type, is_active) VALUES (?, ?, ?, ?, 'TENANT', true)",
+                assignB, tenantBId, memberB2Id, roleBOwnerId
+        );
+
+        // Suspend user 2 globally (e.g. security incident / account lock) while membership remains 'ACTIVE'
+        jdbcTemplate.update("UPDATE users SET status = 'SUSPENDED' WHERE id = ?", user2Id);
+
+        // Canonical eligible OWNER count query for Tenant B
+        Integer eligibleOwnersCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT m.id) " +
+                        "FROM tenant_memberships m " +
+                        "JOIN users u ON u.id = m.user_id " +
+                        "JOIN user_role_assignments a ON a.membership_id = m.id AND a.tenant_id = m.tenant_id " +
+                        "JOIN roles r ON r.id = a.role_id AND r.tenant_id = a.tenant_id " +
+                        "WHERE m.tenant_id = ? " +
+                        "  AND m.status = 'ACTIVE' " +
+                        "  AND u.status = 'ACTIVE' " +
+                        "  AND r.code = 'OWNER' " +
+                        "  AND r.is_active = true " +
+                        "  AND a.is_active = true " +
+                        "  AND a.scope_type = 'TENANT'",
+                Integer.class,
+                tenantBId
+        );
+
+        // Must evaluate to 0 because global user is not ACTIVE!
+        assertThat(eligibleOwnersCount).isEqualTo(0);
+
+        // Tenant B must now be detected by the unbootstrapped/orphaned tenants query
+        List<UUID> detectedTenants = jdbcTemplate.queryForList(
+                "SELECT t.id FROM tenants t " +
+                        "WHERE t.status = 'ACTIVE' " +
+                        "  AND NOT EXISTS ( " +
+                        "      SELECT 1 FROM tenant_memberships m " +
+                        "      JOIN users u ON u.id = m.user_id " +
+                        "      JOIN user_role_assignments a ON a.tenant_id = m.tenant_id AND a.membership_id = m.id " +
+                        "      JOIN roles r ON r.tenant_id = a.tenant_id AND r.id = a.role_id " +
+                        "      WHERE m.tenant_id = t.id " +
+                        "        AND m.status = 'ACTIVE' " +
+                        "        AND u.status = 'ACTIVE' " +
+                        "        AND r.code = 'OWNER' " +
+                        "        AND r.is_active = true " +
+                        "        AND a.is_active = true " +
+                        "        AND a.scope_type = 'TENANT' " +
+                        "  )",
+                UUID.class
+        );
+        assertThat(detectedTenants).contains(tenantBId);
+    }
+
+    @Test
+    @DisplayName("Verify system role immutability is documented as application-level enforcement")
+    void shouldVerifySystemRoleImmutabilityEnforcementLayer() {
+        // Verify database schema defines is_system as a boolean column without DB triggers
+        Boolean isSystem = jdbcTemplate.queryForObject(
+                "SELECT is_system FROM roles WHERE id = ?", Boolean.class, roleAOwnerId
+        );
+        assertThat(isSystem).isTrue();
+
+        // Database level permits updates by database superuser; Application layer (RoleService in M04.4)
+        // is the designated architectural enforcement layer that protects system roles from modification or deletion.
+        Integer triggerCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.triggers WHERE event_object_table = 'roles'",
+                Integer.class
+        );
+        assertThat(triggerCount).isEqualTo(0);
     }
 }

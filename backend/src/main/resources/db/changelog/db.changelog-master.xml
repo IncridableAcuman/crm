@@ -20,5 +20,6 @@
     <include file="db/changelog/v1.0.0/12-create-user-role-assignments.xml"/>
     <include file="db/changelog/v1.0.0/13-seed-permissions-catalog.xml"/>
     <include file="db/changelog/v1.0.0/14-seed-system-roles.xml"/>
+    <include file="db/changelog/v1.0.0/15-harden-rbac-foreign-keys.xml"/>
 
 </databaseChangeLog>
