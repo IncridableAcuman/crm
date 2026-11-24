@@ -74,5 +74,26 @@ class PostgresLiquibaseMigrationIntegrationTest {
                 Integer.class
         );
         assertThat(indexCount).isNotNull().isEqualTo(1);
+
+        // Verify M04.2 changesets 09-14 were executed
+        for (int i = 9; i <= 14; i++) {
+            String prefix = String.format("v1.0.0-%02d-", i);
+            Integer rbacChangesetCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM databasechangelog WHERE id LIKE ?",
+                    Integer.class,
+                    prefix + "%"
+            );
+            assertThat(rbacChangesetCount)
+                    .as("Changeset %s must be executed", prefix)
+                    .isNotNull()
+                    .isEqualTo(1);
+        }
+
+        // Verify permissions table has 33 seeded permissions
+        Integer permCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM permissions",
+                Integer.class
+        );
+        assertThat(permCount).isNotNull().isEqualTo(33);
     }
 }

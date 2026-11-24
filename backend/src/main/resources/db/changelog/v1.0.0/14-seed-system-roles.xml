@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-14-seed-system-roles" author="savdocrm-security" dbms="postgresql">
+        <comment>Seed the seven built-in system role templates and permissions for all existing tenants</comment>
+        <sql>
+            -- 1. Seed system roles for existing tenants
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'OWNER', 'Owner', 'Store Owner / Founder with unrestricted administrative access', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'OWNER');
+
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'ADMIN', 'Administrator', 'Store Administrator with operational management across all modules', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'ADMIN');
+
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'MANAGER', 'Store Manager', 'Branch / Store Manager overseeing daily sales, inventory, and staff', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'MANAGER');
+
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'CASHIER', 'Cashier', 'Cashier / POS Operator focused on order checkout and customer lookup', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'CASHIER');
+
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'WAREHOUSE_MANAGER', 'Warehouse Manager', 'Warehouse / Stockroom Lead managing stock receipts and adjustments', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'WAREHOUSE_MANAGER');
+
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'ACCOUNTANT', 'Accountant', 'Financial Specialist handling expenses, reconciliation, and audit logs', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'ACCOUNTANT');
+
+            INSERT INTO roles (id, tenant_id, code, name, description, is_system, is_active, created_at, updated_at, version)
+            SELECT gen_random_uuid(), t.id, 'VIEWER', 'Viewer', 'Read-only Auditor with view access across store records', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0
+            FROM tenants t
+            WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.code = 'VIEWER');
+
+            -- 2. Seed role_permissions for OWNER (all 33 permissions)
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            CROSS JOIN permissions p
+            WHERE r.code = 'OWNER'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+
+            -- 3. Seed role_permissions for ADMIN (all except system.settings.manage)
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            CROSS JOIN permissions p
+            WHERE r.code = 'ADMIN'
+              AND p.code != 'system.settings.manage'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+
+            -- 4. Seed role_permissions for MANAGER
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            JOIN permissions p ON p.code IN (
+                'analytics.dashboard.read', 'analytics.reports.read',
+                'catalog.products.read', 'catalog.products.create', 'catalog.products.update',
+                'catalog.categories.read',
+                'inventory.stock.read', 'inventory.transfers.create',
+                'sales.orders.read', 'sales.orders.create', 'sales.refunds.create',
+                'purchases.orders.read', 'purchases.orders.create',
+                'parties.customers.read', 'parties.customers.manage',
+                'parties.suppliers.read',
+                'tenancy.branches.read',
+                'identity.users.read',
+                'identity.roles.read'
+            )
+            WHERE r.code = 'MANAGER'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+
+            -- 5. Seed role_permissions for CASHIER
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            JOIN permissions p ON p.code IN (
+                'catalog.products.read',
+                'catalog.categories.read',
+                'sales.orders.read', 'sales.orders.create',
+                'parties.customers.read',
+                'tenancy.branches.read'
+            )
+            WHERE r.code = 'CASHIER'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+
+            -- 6. Seed role_permissions for WAREHOUSE_MANAGER
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            JOIN permissions p ON p.code IN (
+                'catalog.products.read',
+                'catalog.categories.read',
+                'inventory.stock.read', 'inventory.adjustments.create', 'inventory.transfers.create',
+                'purchases.orders.read', 'purchases.receipts.create',
+                'parties.suppliers.read',
+                'tenancy.branches.read'
+            )
+            WHERE r.code = 'WAREHOUSE_MANAGER'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+
+            -- 7. Seed role_permissions for ACCOUNTANT
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            JOIN permissions p ON p.code IN (
+                'analytics.dashboard.read', 'analytics.reports.read',
+                'sales.orders.read',
+                'purchases.orders.read',
+                'parties.customers.read', 'parties.suppliers.read',
+                'finance.accounts.read', 'finance.expenses.read', 'finance.expenses.create',
+                'tenancy.branches.read',
+                'system.audit_logs.read'
+            )
+            WHERE r.code = 'ACCOUNTANT'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+
+            -- 8. Seed role_permissions for VIEWER
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            JOIN permissions p ON p.code IN (
+                'analytics.dashboard.read', 'analytics.reports.read',
+                'catalog.products.read',
+                'catalog.categories.read',
+                'inventory.stock.read',
+                'sales.orders.read',
+                'purchases.orders.read',
+                'parties.customers.read', 'parties.suppliers.read',
+                'finance.expenses.read',
+                'tenancy.branches.read',
+                'identity.users.read',
+                'identity.roles.read'
+            )
+            WHERE r.code = 'VIEWER'
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+        </sql>
+
+        <rollback>
+            <delete tableName="role_permissions"/>
+            <delete tableName="roles">
+                <where>is_system = true</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

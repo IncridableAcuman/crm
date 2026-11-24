@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-10-create-roles" author="savdocrm-security">
+        <comment>Create roles table with tenant scoping, candidate keys, and system role flag</comment>
+        <createTable tableName="roles">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_roles" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_roles_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="code" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT"/>
+            <column name="is_system" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_active" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="roles"
+                             columnNames="tenant_id, code"
+                             constraintName="uq_roles_tenant_code"/>
+
+        <addUniqueConstraint tableName="roles"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_roles_tenant_id"/>
+
+        <createIndex tableName="roles" indexName="idx_roles_tenant">
+            <column name="tenant_id"/>
+        </createIndex>
+
+        <createIndex tableName="roles" indexName="idx_roles_tenant_active">
+            <column name="tenant_id"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="roles"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

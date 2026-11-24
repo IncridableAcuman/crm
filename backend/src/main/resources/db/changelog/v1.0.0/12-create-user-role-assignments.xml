@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-12-create-user-role-assignments" author="savdocrm-security">
+        <comment>Create user_role_assignments table with composite foreign keys, scope validation, and partial unique indexes</comment>
+        <createTable tableName="user_role_assignments">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_user_role_assignments" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_assignments_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="membership_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="role_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="scope_type" type="VARCHAR(30)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="branch_id" type="UUID"/>
+            <column name="is_active" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="revoked_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                 baseColumnNames="tenant_id, membership_id"
+                                 constraintName="fk_assignments_membership"
+                                 referencedTableName="tenant_memberships"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                 baseColumnNames="tenant_id, role_id"
+                                 constraintName="fk_assignments_role"
+                                 referencedTableName="roles"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="CASCADE"/>
+
+        <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                 baseColumnNames="tenant_id, branch_id"
+                                 constraintName="fk_assignments_branch"
+                                 referencedTableName="branches"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="CASCADE"/>
+
+        <sql>
+            ALTER TABLE user_role_assignments
+            ADD CONSTRAINT chk_assignments_scope_type
+            CHECK (scope_type IN ('TENANT', 'BRANCH'));
+
+            ALTER TABLE user_role_assignments
+            ADD CONSTRAINT chk_assignments_scope_branch
+            CHECK (
+                (scope_type = 'TENANT' AND branch_id IS NULL) OR
+                (scope_type = 'BRANCH' AND branch_id IS NOT NULL)
+            );
+        </sql>
+
+        <sql dbms="postgresql">
+            CREATE UNIQUE INDEX uq_assignments_active_tenant
+            ON user_role_assignments (tenant_id, membership_id, role_id)
+            WHERE is_active = true AND scope_type = 'TENANT';
+
+            CREATE UNIQUE INDEX uq_assignments_active_branch
+            ON user_role_assignments (tenant_id, membership_id, role_id, branch_id)
+            WHERE is_active = true AND scope_type = 'BRANCH';
+        </sql>
+
+        <createIndex tableName="user_role_assignments" indexName="idx_assignments_tenant_member_active">
+            <column name="tenant_id"/>
+            <column name="membership_id"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <createIndex tableName="user_role_assignments" indexName="idx_assignments_tenant_role_active">
+            <column name="tenant_id"/>
+            <column name="role_id"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <createIndex tableName="user_role_assignments" indexName="idx_assignments_branch">
+            <column name="branch_id"/>
+        </createIndex>
+
+        <createIndex tableName="user_role_assignments" indexName="idx_assignments_tenant">
+            <column name="tenant_id"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="user_role_assignments"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

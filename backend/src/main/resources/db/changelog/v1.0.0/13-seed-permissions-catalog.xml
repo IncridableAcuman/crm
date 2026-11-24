@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-13-seed-permissions-catalog" author="savdocrm-security">
+        <comment>Seed canonical system permissions catalog (33 atomic capabilities across SAVDOCRM bounded contexts)</comment>
+
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000001"/>
+            <column name="code" value="analytics.dashboard.read"/>
+            <column name="module" value="analytics"/>
+            <column name="resource" value="dashboard"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View operational dashboard metrics and summary KPIs"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000002"/>
+            <column name="code" value="analytics.reports.read"/>
+            <column name="module" value="analytics"/>
+            <column name="resource" value="reports"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View business, sales, and operational analytics reports"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000003"/>
+            <column name="code" value="catalog.products.read"/>
+            <column name="module" value="catalog"/>
+            <column name="resource" value="products"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View catalog products, prices, barcodes, and details"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000004"/>
+            <column name="code" value="catalog.products.create"/>
+            <column name="module" value="catalog"/>
+            <column name="resource" value="products"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Create new catalog products"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000005"/>
+            <column name="code" value="catalog.products.update"/>
+            <column name="module" value="catalog"/>
+            <column name="resource" value="products"/>
+            <column name="action" value="update"/>
+            <column name="description" value="Update existing catalog products and pricing"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000006"/>
+            <column name="code" value="catalog.products.delete"/>
+            <column name="module" value="catalog"/>
+            <column name="resource" value="products"/>
+            <column name="action" value="delete"/>
+            <column name="description" value="Delete or archive catalog products"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000007"/>
+            <column name="code" value="catalog.categories.read"/>
+            <column name="module" value="catalog"/>
+            <column name="resource" value="categories"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View catalog product categories"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000008"/>
+            <column name="code" value="catalog.categories.manage"/>
+            <column name="module" value="catalog"/>
+            <column name="resource" value="categories"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, update, and delete product categories"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000009"/>
+            <column name="code" value="inventory.stock.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="stock"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View inventory stock levels and movements"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000000a"/>
+            <column name="code" value="inventory.adjustments.create"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="adjustments"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Perform inventory stock adjustments and write-offs"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000000b"/>
+            <column name="code" value="inventory.transfers.create"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="transfers"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Initiate and approve inter-branch stock transfers"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000000c"/>
+            <column name="code" value="sales.orders.read"/>
+            <column name="module" value="sales"/>
+            <column name="resource" value="orders"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View sales orders, POS receipts, and transactions"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000000d"/>
+            <column name="code" value="sales.orders.create"/>
+            <column name="module" value="sales"/>
+            <column name="resource" value="orders"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Create sales orders and process POS checkout"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000000e"/>
+            <column name="code" value="sales.refunds.create"/>
+            <column name="module" value="sales"/>
+            <column name="resource" value="refunds"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Process sales returns and payment refunds"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000000f"/>
+            <column name="code" value="purchases.orders.read"/>
+            <column name="module" value="purchases"/>
+            <column name="resource" value="orders"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View supplier purchase orders"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000010"/>
+            <column name="code" value="purchases.orders.create"/>
+            <column name="module" value="purchases"/>
+            <column name="resource" value="orders"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Create purchase orders for suppliers"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000011"/>
+            <column name="code" value="purchases.receipts.create"/>
+            <column name="module" value="purchases"/>
+            <column name="resource" value="receipts"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Receive goods against supplier purchase orders"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000012"/>
+            <column name="code" value="parties.customers.read"/>
+            <column name="module" value="parties"/>
+            <column name="resource" value="customers"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View customer profiles and purchase history"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000013"/>
+            <column name="code" value="parties.customers.manage"/>
+            <column name="module" value="parties"/>
+            <column name="resource" value="customers"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, update, and manage customer records"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000014"/>
+            <column name="code" value="parties.suppliers.read"/>
+            <column name="module" value="parties"/>
+            <column name="resource" value="suppliers"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View supplier directory and contact details"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000015"/>
+            <column name="code" value="parties.suppliers.manage"/>
+            <column name="module" value="parties"/>
+            <column name="resource" value="suppliers"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, update, and manage supplier records"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000016"/>
+            <column name="code" value="finance.accounts.read"/>
+            <column name="module" value="finance"/>
+            <column name="resource" value="accounts"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View financial accounts and payment methods"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000017"/>
+            <column name="code" value="finance.expenses.read"/>
+            <column name="module" value="finance"/>
+            <column name="resource" value="expenses"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View expense transactions and payment logs"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000018"/>
+            <column name="code" value="finance.expenses.create"/>
+            <column name="module" value="finance"/>
+            <column name="resource" value="expenses"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Record business operating expenses"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000019"/>
+            <column name="code" value="tenancy.branches.read"/>
+            <column name="module" value="tenancy"/>
+            <column name="resource" value="branches"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View store branch details and locations"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000001a"/>
+            <column name="code" value="tenancy.branches.manage"/>
+            <column name="module" value="tenancy"/>
+            <column name="resource" value="branches"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, update, and deactivate store branches"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000001b"/>
+            <column name="code" value="identity.users.read"/>
+            <column name="module" value="identity"/>
+            <column name="resource" value="users"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View store team members and their membership status"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000001c"/>
+            <column name="code" value="identity.users.manage"/>
+            <column name="module" value="identity"/>
+            <column name="resource" value="users"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Invite, activate, and suspend tenant memberships"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000001d"/>
+            <column name="code" value="identity.roles.read"/>
+            <column name="module" value="identity"/>
+            <column name="resource" value="roles"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View tenant roles and permission assignments"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000001e"/>
+            <column name="code" value="identity.roles.manage"/>
+            <column name="module" value="identity"/>
+            <column name="resource" value="roles"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create and configure custom tenant roles"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000001f"/>
+            <column name="code" value="system.audit_logs.read"/>
+            <column name="module" value="system"/>
+            <column name="resource" value="audit_logs"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View system security audit trail and access logs"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000020"/>
+            <column name="code" value="system.settings.read"/>
+            <column name="module" value="system"/>
+            <column name="resource" value="settings"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View store configuration and system settings"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000021"/>
+            <column name="code" value="system.settings.manage"/>
+            <column name="module" value="system"/>
+            <column name="resource" value="settings"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Update store configuration and system settings"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+
+        <rollback>
+            <delete tableName="permissions"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

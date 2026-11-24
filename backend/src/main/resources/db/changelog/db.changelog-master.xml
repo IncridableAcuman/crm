@@ -14,5 +14,11 @@
     <include file="db/changelog/v1.0.0/06-add-successor-token-encrypted.xml"/>
     <include file="db/changelog/v1.0.0/07-remove-successor-token-encrypted.xml"/>
     <include file="db/changelog/v1.0.0/08-add-refresh-tokens-cleanup-index.xml"/>
+    <include file="db/changelog/v1.0.0/09-create-permissions.xml"/>
+    <include file="db/changelog/v1.0.0/10-create-roles.xml"/>
+    <include file="db/changelog/v1.0.0/11-create-role-permissions.xml"/>
+    <include file="db/changelog/v1.0.0/12-create-user-role-assignments.xml"/>
+    <include file="db/changelog/v1.0.0/13-seed-permissions-catalog.xml"/>
+    <include file="db/changelog/v1.0.0/14-seed-system-roles.xml"/>
 
 </databaseChangeLog>
