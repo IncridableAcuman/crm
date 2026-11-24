@@ -110,6 +110,11 @@ public class RoleAssignmentService {
         if (!role.getTenantId().equals(command.tenantId())) {
             throw new CrossTenantAssignmentException("Role does not belong to tenant: " + command.tenantId());
         }
+
+        // Lock the tenant-owned role to serialize with concurrent role deletion / deactivation
+        role = roleRepository.findByTenantIdAndIdWithLock(command.tenantId(), command.roleId())
+                .orElseThrow(() -> new RoleNotFoundException(command.roleId()));
+
         if (!role.isActive()) {
             throw new IllegalArgumentException("Cannot assign an inactive role: " + role.getCode());
         }
@@ -172,10 +177,23 @@ public class RoleAssignmentService {
      */
     @Transactional
     public void revokeRoleAssignment(UUID tenantId, UUID assignmentId, UUID actorUserId) {
-        log.info("Revoking role assignment {} in tenant {} by actor {}", assignmentId, tenantId, actorUserId);
+        revokeRoleAssignment(tenantId, null, assignmentId, actorUserId);
+    }
+
+    /**
+     * Revokes an existing role assignment for a specific membership. Preserves historical assignment record.
+     * Enforces concurrency-safe Last Active Owner check via pessimistic parent tenant lock.
+     */
+    @Transactional
+    public void revokeRoleAssignment(UUID tenantId, UUID membershipId, UUID assignmentId, UUID actorUserId) {
+        log.info("Revoking role assignment {} for member {} in tenant {} by actor {}", assignmentId, membershipId, tenantId, actorUserId);
 
         UserRoleAssignment assignment = userRoleAssignmentRepository.findByTenantIdAndId(tenantId, assignmentId)
                 .orElseThrow(() -> new IllegalArgumentException("Role assignment not found with ID: " + assignmentId));
+
+        if (membershipId != null && !assignment.getMembershipId().equals(membershipId)) {
+            throw new IllegalArgumentException("Role assignment " + assignmentId + " does not belong to membership: " + membershipId);
+        }
 
         if (!assignment.isActive()) {
             log.info("Assignment {} is already revoked. Idempotent return.", assignmentId);

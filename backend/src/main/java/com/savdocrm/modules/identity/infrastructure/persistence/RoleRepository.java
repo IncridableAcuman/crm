@@ -18,4 +18,11 @@ public interface RoleRepository extends TenantAwareRepository<Role, UUID> {
     List<Role> findAllByTenantId(UUID tenantId);
 
     List<Role> findAllByTenantIdAndIsActiveTrue(UUID tenantId);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT r FROM Role r WHERE r.tenantId = :tenantId AND r.id = :id")
+    Optional<Role> findByTenantIdAndIdWithLock(
+            @org.springframework.data.repository.query.Param("tenantId") UUID tenantId,
+            @org.springframework.data.repository.query.Param("id") UUID id
+    );
 }

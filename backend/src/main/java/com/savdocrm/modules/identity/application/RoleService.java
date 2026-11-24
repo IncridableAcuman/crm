@@ -106,9 +106,8 @@ public class RoleService {
             throw new DuplicateRoleCodeException("A role with code '" + normalizedCode + "' already exists in this tenant.");
         }
 
-        Set<String> initialPermissions = request.permissions() != null ? request.permissions() : Collections.emptySet();
+        Set<String> initialPermissions = validateAndExtractPermissions(request.permissions());
         if (!initialPermissions.isEmpty()) {
-            validatePermissionsExistInCatalog(initialPermissions);
             enforceGrantWhatYouHold(tenantId, actorUserId, initialPermissions, Collections.emptySet());
         }
 
@@ -139,7 +138,7 @@ public class RoleService {
     public RoleResponse updateRole(UUID tenantId, UUID roleId, UpdateRoleRequest request, UUID actorUserId) {
         log.info("Updating role {} in tenant {} by actor {}", roleId, tenantId, actorUserId);
 
-        Role role = roleRepository.findByTenantIdAndId(tenantId, roleId)
+        Role role = roleRepository.findByTenantIdAndIdWithLock(tenantId, roleId)
                 .orElseThrow(() -> new RoleNotFoundException(roleId));
 
         if (role.isSystem()) {
@@ -162,7 +161,7 @@ public class RoleService {
     public void deleteOrDeactivateRole(UUID tenantId, UUID roleId, UUID actorUserId) {
         log.info("Deleting or deactivating role {} in tenant {} by actor {}", roleId, tenantId, actorUserId);
 
-        Role role = roleRepository.findByTenantIdAndId(tenantId, roleId)
+        Role role = roleRepository.findByTenantIdAndIdWithLock(tenantId, roleId)
                 .orElseThrow(() -> new RoleNotFoundException(roleId));
 
         if (role.isSystem()) {
@@ -197,19 +196,17 @@ public class RoleService {
      * System roles reject updates. Enforces Grant-What-You-Hold on newly added permissions.
      */
     @Transactional
-    public Set<String> updateRolePermissions(UUID tenantId, UUID roleId, Set<String> requestedPermissions, UUID actorUserId) {
+    public Set<String> updateRolePermissions(UUID tenantId, UUID roleId, List<String> requestedPermissions, UUID actorUserId) {
         log.info("Updating permissions for role {} in tenant {} by actor {}", roleId, tenantId, actorUserId);
 
-        Role role = roleRepository.findByTenantIdAndId(tenantId, roleId)
+        Role role = roleRepository.findByTenantIdAndIdWithLock(tenantId, roleId)
                 .orElseThrow(() -> new RoleNotFoundException(roleId));
 
         if (role.isSystem()) {
             throw new SystemRoleImmutableException("Built-in system role permissions cannot be modified.");
         }
 
-        Set<String> newPermCodes = requestedPermissions != null ? requestedPermissions : Collections.emptySet();
-        validatePermissionsExistInCatalog(newPermCodes);
-
+        Set<String> newPermCodes = validateAndExtractPermissions(requestedPermissions);
         Set<String> currentPermCodes = rolePermissionRepository.findPermissionCodesByTenantIdAndRoleId(tenantId, roleId);
 
         // Enforce Grant-What-You-Hold on newly added permissions
@@ -242,6 +239,16 @@ public class RoleService {
         roleRepository.save(role);
 
         return Collections.unmodifiableSet(newPermCodes);
+    }
+
+    @Transactional
+    public Set<String> updateRolePermissions(UUID tenantId, UUID roleId, Set<String> requestedPermissions, UUID actorUserId) {
+        return updateRolePermissions(
+                tenantId,
+                roleId,
+                requestedPermissions != null ? new ArrayList<>(requestedPermissions) : Collections.emptyList(),
+                actorUserId
+        );
     }
 
     private void enforceGrantWhatYouHold(UUID tenantId, UUID actorUserId, Set<String> requestedPermissions, Set<String> existingPermissions) {
@@ -291,12 +298,25 @@ public class RoleService {
                         && roleRepository.findById(a.getRoleId()).map(Role::isOwner).orElse(false));
     }
 
-    private void validatePermissionsExistInCatalog(Set<String> permissionCodes) {
+    private Set<String> validateAndExtractPermissions(List<String> permissionCodes) {
+        if (permissionCodes == null || permissionCodes.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        Set<String> seen = new HashSet<>();
         for (String code : permissionCodes) {
-            if (!Permissions.isValidCode(code)) {
-                throw new IllegalArgumentException("Unknown permission code: " + code);
+            if (code == null || code.trim().isBlank()) {
+                throw new IllegalArgumentException("Permission code cannot be blank.");
+            }
+            String trimmed = code.trim();
+            if (!Permissions.isValidCode(trimmed)) {
+                throw new IllegalArgumentException("Unknown permission code: " + trimmed);
+            }
+            if (!seen.add(trimmed)) {
+                throw new IllegalArgumentException("Duplicate permission code: " + trimmed);
             }
         }
+        return seen;
     }
 
     private void saveRolePermissions(UUID tenantId, UUID roleId, Set<String> permissionCodes) {

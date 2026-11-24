@@ -95,6 +95,10 @@ public class UserRoleAssignmentController {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
         UUID actorUserId = principal != null ? principal.getId() : null;
 
+        if (request.membershipId() != null && !request.membershipId().equals(membershipId)) {
+            throw new IllegalArgumentException("Path membershipId and request body membershipId do not match.");
+        }
+
         AssignRoleCommand command = new AssignRoleCommand(
                 tenantId,
                 membershipId,
@@ -131,7 +135,7 @@ public class UserRoleAssignmentController {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
         UUID actorUserId = principal != null ? principal.getId() : null;
 
-        roleAssignmentService.revokeRoleAssignment(tenantId, assignmentId, actorUserId);
+        roleAssignmentService.revokeRoleAssignment(tenantId, membershipId, assignmentId, actorUserId);
         return ResponseEntity.ok(ApiResponse.success(null, "Role assignment revoked successfully"));
     }
 }

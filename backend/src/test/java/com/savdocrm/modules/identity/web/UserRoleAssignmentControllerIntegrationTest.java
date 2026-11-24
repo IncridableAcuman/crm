@@ -577,4 +577,47 @@ class UserRoleAssignmentControllerIntegrationTest {
         UserRoleAssignment revoked = userRoleAssignmentRepository.findById(secondOwnerAssignment.getId()).orElseThrow();
         assertThat(revoked.isActive()).isFalse();
     }
+
+    @Test
+    @DisplayName("DELETE /api/v1/members/{membershipId}/roles/{assignmentId} rejects mismatched membership ID (400 Bad Request)")
+    void shouldRejectRevokingAssignmentWithMismatchedMembershipId() throws Exception {
+        Role cashierRole = roleRepository.findByTenantIdAndCode(tenantA.getId(), SystemRoles.CASHIER).orElseThrow();
+
+        UserRoleAssignment assignment = UserRoleAssignment.builder()
+                .membershipId(targetMembershipA.getId())
+                .roleId(cashierRole.getId())
+                .scopeType(RoleScopeType.TENANT)
+                .isActive(true)
+                .build();
+        assignment.setTenantId(tenantA.getId());
+        assignment = userRoleAssignmentRepository.save(assignment);
+
+        // Attempt to revoke using adminMembershipA in the path instead of targetMembershipA
+        mockMvc.perform(delete("/api/v1/members/" + adminMembershipA.getId() + "/roles/" + assignment.getId())
+                        .header("Authorization", "Bearer " + ownerTokenA))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad Request"))
+                .andExpect(jsonPath("$.detail").value("Role assignment " + assignment.getId() + " does not belong to membership: " + adminMembershipA.getId()));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/members/{membershipId}/roles rejects mismatched path and body membership (400 Bad Request)")
+    void shouldRejectMismatchedMembershipInPathAndBody() throws Exception {
+        Role cashierRole = roleRepository.findByTenantIdAndCode(tenantA.getId(), SystemRoles.CASHIER).orElseThrow();
+
+        CreateRoleAssignmentRequest request = new CreateRoleAssignmentRequest(
+                adminMembershipA.getId(), // different from path
+                cashierRole.getId(),
+                RoleScopeType.TENANT,
+                null
+        );
+
+        mockMvc.perform(post("/api/v1/members/" + targetMembershipA.getId() + "/roles")
+                        .header("Authorization", "Bearer " + ownerTokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad Request"))
+                .andExpect(jsonPath("$.detail").value("Path membershipId and request body membershipId do not match."));
+    }
 }

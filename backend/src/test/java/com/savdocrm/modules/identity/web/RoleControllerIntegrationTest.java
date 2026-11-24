@@ -616,4 +616,51 @@ class RoleControllerIntegrationTest {
         Set<String> assignedPerms = rolePermissionRepository.findPermissionCodesByTenantIdAndRoleId(tenantA.getId(), customRole.getId());
         assertThat(assignedPerms).containsExactlyInAnyOrder(Permissions.FINANCE_ACCOUNTS_READ, Permissions.FINANCE_EXPENSES_READ);
     }
+
+    @Test
+    @DisplayName("PUT /api/v1/roles/{roleId}/permissions rejects duplicate permission codes with 400 Bad Request")
+    void shouldRejectDuplicatePermissionCodesInUpdate() throws Exception {
+        Role customRole = Role.builder()
+                .code("DUPE_PERM_TEST")
+                .name("Dupe Perm Test")
+                .isSystem(false)
+                .isActive(true)
+                .build();
+        customRole.setTenantId(tenantA.getId());
+        customRole = roleRepository.save(customRole);
+
+        String jsonPayload = """
+                {
+                    "permissions": ["sales.orders.read", "sales.orders.read"]
+                }
+                """;
+
+        mockMvc.perform(put("/api/v1/roles/" + customRole.getId() + "/permissions")
+                        .header("Authorization", "Bearer " + ownerTokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad Request"))
+                .andExpect(jsonPath("$.detail").value("Duplicate permission code: sales.orders.read"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/roles rejects duplicate permission codes with 400 Bad Request")
+    void shouldRejectDuplicatePermissionCodesInCreate() throws Exception {
+        String jsonPayload = """
+                {
+                    "code": "DUPE_CREATE_ROLE",
+                    "name": "Dupe Create Role",
+                    "permissions": ["catalog.products.read", "catalog.products.read"]
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/roles")
+                        .header("Authorization", "Bearer " + ownerTokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonPayload))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Bad Request"))
+                .andExpect(jsonPath("$.detail").value("Duplicate permission code: catalog.products.read"));
+    }
 }

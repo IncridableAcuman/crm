@@ -4,6 +4,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 
 public record CreateRoleRequest(
@@ -18,5 +21,9 @@ public record CreateRoleRequest(
         @Size(max = 1000, message = "Description cannot exceed 1000 characters")
         String description,
 
-        Set<String> permissions
-) {}
+        List<String> permissions
+) {
+    public CreateRoleRequest(String code, String name, String description, Set<String> permissions) {
+        this(code, name, description, permissions != null ? new ArrayList<>(permissions) : Collections.emptyList());
+    }
+}
