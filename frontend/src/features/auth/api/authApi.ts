@@ -1,5 +1,13 @@
-import { apiClient } from '../../../shared/api/client';
+import {
+  apiClient,
+  setSharedSessionState,
+  clearSharedSessionState,
+  broadcastAuthCleared,
+  getSharedSessionState,
+} from '../../../shared/api/client';
 import { ApiResponse, AuthResponse } from '../../../entities/session/model/types';
+import { useAuthStore } from '../model/useAuthStore';
+import { queryClient } from '../../../shared/api/queryClient';
 
 export interface RegisterPayload {
   email: string;
@@ -23,26 +31,53 @@ export interface SelectTenantPayload {
 export const authApi = {
   register: async (payload: RegisterPayload): Promise<AuthResponse> => {
     const res = await apiClient.post<ApiResponse<AuthResponse>>('/auth/register', payload);
+    setSharedSessionState({
+      state: 'AUTHENTICATED',
+      timestamp: Date.now(),
+      refreshEpoch: 0,
+    });
     return res.data.data;
   },
 
   login: async (payload: LoginPayload): Promise<AuthResponse> => {
     const res = await apiClient.post<ApiResponse<AuthResponse>>('/auth/login', payload);
+    setSharedSessionState({
+      state: 'AUTHENTICATED',
+      timestamp: Date.now(),
+      refreshEpoch: 0,
+    });
     return res.data.data;
   },
 
   selectTenant: async (payload: SelectTenantPayload): Promise<AuthResponse> => {
     const res = await apiClient.post<ApiResponse<AuthResponse>>('/auth/select-tenant', payload);
+    setSharedSessionState({
+      state: 'AUTHENTICATED',
+      timestamp: Date.now(),
+      refreshEpoch: getSharedSessionState()?.refreshEpoch ?? 0,
+    });
     return res.data.data;
   },
 
   refreshToken: async (): Promise<AuthResponse> => {
     const res = await apiClient.post<ApiResponse<AuthResponse>>('/auth/refresh');
+    setSharedSessionState({
+      state: 'AUTHENTICATED',
+      timestamp: Date.now(),
+      refreshEpoch: getSharedSessionState()?.refreshEpoch ?? 0,
+    });
     return res.data.data;
   },
 
   logout: async (): Promise<void> => {
-    await apiClient.post<ApiResponse<void>>('/auth/logout');
+    try {
+      await apiClient.post<ApiResponse<void>>('/auth/logout');
+    } finally {
+      useAuthStore.getState().clearAuth();
+      queryClient.clear();
+      clearSharedSessionState();
+      broadcastAuthCleared();
+    }
   },
 
   getMe: async (): Promise<AuthResponse> => {

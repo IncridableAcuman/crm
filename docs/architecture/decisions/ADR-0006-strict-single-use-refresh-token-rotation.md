@@ -17,6 +17,8 @@
   7. **Missed Broadcast Defense**: A non-token shared session metadata marker in `localStorage` (`savdocrm_session_state`) prevents any tab from reusing stale in-memory tokens or firing invalid refreshes if it was asleep during a broadcast.
   8. **Zero Token Persistence**: Neither access tokens nor refresh tokens are EVER stored in `localStorage` or `sessionStorage`. Refresh tokens are stored exclusively in HttpOnly cookies, and access tokens in memory.
   9. **Trusted Reverse Proxy IP Verification**: `ClientIpResolver` ensures `X-Forwarded-For` is only parsed when the connection originates from configured trusted reverse proxies (`security.trusted-proxies`).
+  10. **Automated Scheduled Retention Cleanup**: Scheduled background task (`RefreshTokenCleanupTask` via `@EnableScheduling`) purges expired revoked tokens exceeding the 90-day retention cutoff, backed by composite index `idx_refresh_tokens_cleanup`.
+  11. **Cross-Tab Storage Event Synchronization**: `storage` event listeners guarantee cross-tab session termination in real time, while `authApi` automatically synchronizes session metadata across login, register, refresh, and logout lifecycles.
 
 - **Consequences**:
   - *Positive*:

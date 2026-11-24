@@ -177,9 +177,12 @@ sequenceDiagram
    - A successful refresh emits `REFRESH_SUCCESS` carrying the new `accessToken` and `activeTenant`.
    - **Critical Security Invariant**: The `refreshToken` is **NEVER** broadcast over `BroadcastChannel`. It remains exclusively in the browser's HttpOnly cookie jar.
    - A failed refresh emits `AUTH_CLEARED`, immediately wiping state and clearing queries across all tabs.
-4. **Missed Broadcast Defense & Zero Token Persistence:**
+4. **Missed Broadcast Defense, Storage Event Synchronization & Zero Token Persistence:**
    - A non-token shared session metadata record is maintained in `localStorage` (`savdocrm_session_state: { state: 'AUTHENTICATED' | 'UNAUTHENTICATED', timestamp, refreshEpoch }`).
    - If a tab was backgrounded or asleep and missed an `AUTH_CLEARED` broadcast, its request interceptor checks `getSharedSessionState()`. If marked `UNAUTHENTICATED`, the tab aborts immediately without attempting to reuse stale in-memory tokens.
+   - **Cross-Tab Storage Event Synchronization**: A `window.addEventListener('storage', ...)` listener detects session invalidation from peer tabs in real time, immediately wiping in-memory auth state and clearing React Query caches.
+   - **Login Session Restoration**: Successful login, registration, or initial token refresh updates `savdocrm_session_state` to `AUTHENTICATED` to cleanly restore valid session state across all tabs.
+   - **Unified Explicit Logout**: Explicit user logout (`authApi.logout()`) clears in-memory state, purges React Query cache, resets shared session state to `UNAUTHENTICATED`, and broadcasts `AUTH_CLEARED` to notify all open browser tabs.
    - Neither access tokens nor refresh tokens are EVER stored in `localStorage` or `sessionStorage`.
 5. **Fallback Strategy**:
    - For environments lacking the Web Locks API, the client falls back to an in-tab single-flight concurrency queue (`isRefreshing` + `failedQueue`).
@@ -191,6 +194,8 @@ sequenceDiagram
 In cloud and containerized deployments, backend applications run behind reverse proxies or load balancers (e.g., NGINX, AWS ALB, Cloudflare).
 - To prevent IP spoofing in audit logs and security telemetry, `ClientIpResolver` inspects `X-Forwarded-For` **only when the direct connection originates from a configured trusted proxy** (`security.trusted-proxies`).
 - If an untrusted direct client provides an `X-Forwarded-For` header, it is completely ignored, and `request.getRemoteAddr()` is recorded.
+- **Production Default**: By default, `security.trusted-proxies` includes only localhost loopbacks (`127.0.0.1, ::1, 0:0:0:0:0:0:0:1`). In production deployments with edge reverse proxies or load balancers, the private IP CIDRs of trusted intermediaries must be explicitly configured via `SECURITY_TRUSTED_PROXIES`.
+- **Known Limitation in Multi-Hop Environments**: When multiple untrusted intermediaries exist upstream of a trusted proxy, the leftmost element of `X-Forwarded-For` is extracted. If upstream edge proxies append rather than overwrite `X-Forwarded-For`, the edge proxy configuration should ensure untrusted client headers are stripped or sanitized before forwarding.
 
 ---
 
@@ -200,11 +205,18 @@ In cloud and containerized deployments, backend applications run behind reverse 
 1. `v1.0.0-05-create-refresh-tokens`: Created `refresh_tokens` table with SHA-256 token hashing, `token_family`, tenant context, and revocation metadata.
 2. `v1.0.0-06-add-successor-token-encrypted`: Added encrypted successor token columns (deprecated).
 3. `v1.0.0-07-remove-successor-token-encrypted`: Safely drops `successor_token_encrypted` column while preserving `successor_token_hash` for audit and security analysis. Rollback re-adds the column as nullable.
+4. `v1.0.0-08-add-refresh-tokens-cleanup-index`: Creates composite index `idx_refresh_tokens_cleanup` on `(revoked, expires_at)` to accelerate scheduled retention queries and eliminate full-table sequential scans.
 
-### 7.2 Retention & Cleanup Strategy
+### 7.2 Retention & Automated Scheduled Cleanup
 - Active tokens remain valid until expiration.
 - Rotated tokens are preserved with their `successor_token_hash`, revocation timestamp, and revocation reason for compromise analysis and forensic auditing.
-- `AuthService.cleanupExpiredRevokedTokens(Instant cutoff)` purges revoked tokens where `expires_at < cutoff` (e.g., older than 90 days), preserving audit integrity while bounding table growth.
+- **Automated Scheduled Cleanup (`RefreshTokenCleanupTask`)**:
+  - Spring scheduling enabled via `@EnableScheduling` in `SavdoCrmApplication`.
+  - Configurable daily execution via `security.token-cleanup.cron` (default: `0 0 3 * * ?` / 3:00 AM daily).
+  - Retention window controlled by `security.token-cleanup.retention-days` (default: `90` days).
+  - Calculates cutoff `Instant.now().minus(Duration.ofDays(retentionDays))` and executes `AuthService.cleanupExpiredRevokedTokens(cutoff)` in a bounded transaction.
+  - Accelerated by composite index `idx_refresh_tokens_cleanup` on `(revoked, expires_at)`.
+  - Active and unexpired tokens are strictly protected by the query predicate (`revoked = true AND expires_at < cutoff`).
 
 ---
 

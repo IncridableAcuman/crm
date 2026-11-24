@@ -61,6 +61,16 @@ export function clearSharedSessionState(): void {
   }
 }
 
+export function broadcastAuthCleared(): void {
+  try {
+    if (authChannel) {
+      authChannel.postMessage({ type: 'AUTH_CLEARED', timestamp: Date.now() });
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 // BroadcastChannel for cross-tab session coordination
 export const AUTH_CHANNEL_NAME = 'savdocrm_auth_channel';
 export let authChannel: BroadcastChannel | null = null;
@@ -83,6 +93,24 @@ try {
   }
 } catch {
   // BroadcastChannel unavailable in non-browser environment
+}
+
+// Cross-tab storage event synchronization for missed broadcasts or contexts without BroadcastChannel
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key === SHARED_SESSION_STORAGE_KEY && event.newValue) {
+      try {
+        const parsed = JSON.parse(event.newValue) as SharedSessionMetadata;
+        if (parsed?.state === 'UNAUTHENTICATED') {
+          useAuthStore.getState().clearAuth();
+          queryClient.clear();
+          processQueue(new Error('Session terminated by another tab'), null);
+        }
+      } catch {
+        // Safe fail-closed or ignore invalid JSON
+      }
+    }
+  });
 }
 
 // Request Interceptor: Attach in-memory JWT Bearer token and check shared authentication state
@@ -276,14 +304,7 @@ apiClient.interceptors.response.use(
         useAuthStore.getState().clearAuth();
         queryClient.clear();
         clearSharedSessionState();
-
-        try {
-          if (authChannel) {
-            authChannel.postMessage({ type: 'AUTH_CLEARED', timestamp: Date.now() });
-          }
-        } catch {
-          // Ignore
-        }
+        broadcastAuthCleared();
 
         return Promise.reject(refreshError);
       } finally {

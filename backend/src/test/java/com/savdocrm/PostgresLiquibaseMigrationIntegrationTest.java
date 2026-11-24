@@ -67,5 +67,12 @@ class PostgresLiquibaseMigrationIntegrationTest {
                 Integer.class
         );
         assertThat(hashColCount).isNotNull().isEqualTo(1);
+
+        // Verify changeset 08 created composite index on (revoked, expires_at)
+        Integer indexCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'refresh_tokens' AND indexname = 'idx_refresh_tokens_cleanup'",
+                Integer.class
+        );
+        assertThat(indexCount).isNotNull().isEqualTo(1);
     }
 }

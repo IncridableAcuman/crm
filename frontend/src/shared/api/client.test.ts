@@ -212,4 +212,47 @@ describe('HTTP Client & Cross-Tab Coordination', () => {
       expect(broadcastData.refreshToken).toBeUndefined(); // NEVER broadcast refresh token!
     }
   });
+
+  it('should clear in-memory auth and query cache when storage event signals UNAUTHENTICATED', () => {
+    useAuthStore.getState().setAccessToken('active-token-to-be-cleared');
+    queryClient.setQueryData(['cached-key'], { data: 123 });
+
+    // Simulate cross-tab storage event
+    const storageEvent = new StorageEvent('storage', {
+      key: SHARED_SESSION_STORAGE_KEY,
+      newValue: JSON.stringify({
+        state: 'UNAUTHENTICATED',
+        timestamp: Date.now(),
+        refreshEpoch: 0,
+      }),
+    });
+
+    window.dispatchEvent(storageEvent);
+
+    expect(useAuthStore.getState().accessToken).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(queryClient.getQueryData(['cached-key'])).toBeUndefined();
+  });
+
+  it('should allow requests after setSharedSessionState restores AUTHENTICATED state', async () => {
+    // 1. Prior logout set state to UNAUTHENTICATED
+    clearSharedSessionState();
+
+    // 2. User logs in, updating in-memory token and restoring AUTHENTICATED shared state
+    useAuthStore.getState().setAccessToken('freshly-logged-in-token');
+    localStorage.setItem(
+      SHARED_SESSION_STORAGE_KEY,
+      JSON.stringify({
+        state: 'AUTHENTICATED',
+        timestamp: Date.now(),
+        refreshEpoch: 0,
+      })
+    );
+
+    const requestHandler = (apiClient.interceptors.request as any).handlers[0].fulfilled;
+    const config = await requestHandler({ headers: {} });
+
+    expect(config.headers.Authorization).toBe('Bearer freshly-logged-in-token');
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+  });
 });

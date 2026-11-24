@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-08-add-refresh-tokens-cleanup-index" author="savdocrm-security">
+        <comment>Add composite index on (revoked, expires_at) to accelerate scheduled retention cleanup</comment>
+        <createIndex tableName="refresh_tokens" indexName="idx_refresh_tokens_cleanup">
+            <column name="revoked"/>
+            <column name="expires_at"/>
+        </createIndex>
+
+        <rollback>
+            <dropIndex tableName="refresh_tokens" indexName="idx_refresh_tokens_cleanup"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

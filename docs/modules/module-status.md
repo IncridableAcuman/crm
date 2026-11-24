@@ -51,7 +51,7 @@ This document tracks the implementation status of all business and technical mod
     - Automatic Compromise Quarantine: Any replay of a revoked token triggers immediate transactionally consistent invalidation of the entire `token_family` in PostgreSQL.
     - Lost response intentional behavior: retrying an old token after network loss revokes the family and requires re-login (security-first trade-off).
     - Database migration: Liquibase changeset `v1.0.0-07-remove-successor-token-encrypted` safely dropped obsolete `successor_token_encrypted` column while preserving `successor_token_hash`.
-    - Retention & cleanup: `deleteExpiredRevokedTokens` purges expired revoked tokens past retention window (e.g. 90 days).
+    - Retention & cleanup: Automated daily background job (`RefreshTokenCleanupTask` via `@EnableScheduling`, 3:00 AM daily, default 90-day retention cutoff) deletes expired revoked tokens, supported by composite index `idx_refresh_tokens_cleanup` on `(revoked, expires_at)`. Active tokens are strictly protected.
   - Token delivery architecture:
     - Access token: strictly in-memory (Zustand state); zero storage in `localStorage` or `sessionStorage`.
     - Refresh token: delivered via `HttpOnly`, `Secure` (prod), `SameSite=Lax` cookie (`savdocrm_refresh_token`) scoped to `/api/v1/auth`. Omitted from JSON response body.
@@ -59,7 +59,8 @@ This document tracks the implementation status of all business and technical mod
   - Frontend Cross-Tab Coordination:
     - Web Locks API (`savdocrm_refresh_lock`): Mutually exclusive refresh across all tabs. Crashed tabs automatically release browser locks.
     - BroadcastChannel (`savdocrm_auth_channel`): Propagates `REFRESH_SUCCESS` (with `accessToken`, never `refreshToken`) and `AUTH_CLEARED`.
-    - Missed broadcast protection: Non-token session metadata in `localStorage` (`savdocrm_session_state`) prevents using stale in-memory tokens if a background tab missed a broadcast.
+    - Missed broadcast protection & storage events: Non-token session metadata in `localStorage` (`savdocrm_session_state`) prevents using stale in-memory tokens if a background tab missed a broadcast; `window.addEventListener('storage')` immediately syncs session termination across all tabs.
+    - Synchronized Login/Logout Lifecycle: `authApi.login` and `authApi.register` restore `AUTHENTICATED` state, while `authApi.logout` atomically purges in-memory auth, clears React Query cache, sets `UNAUTHENTICATED`, and broadcasts `AUTH_CLEARED`.
     - Fallback: in-tab single-flight queue for environments without Web Locks API.
   - Trusted Reverse Proxy Resolution: `ClientIpResolver` ensures forwarded IP headers (`X-Forwarded-For`) are trusted only when direct connections originate from configured reverse proxies (`security.trusted-proxies`).
   - Dual-phase authentication flow:
@@ -76,4 +77,4 @@ This document tracks the implementation status of all business and technical mod
   - Spring Security stateless filter chain (`SecurityConfig`, `JwtAuthenticationFilter`, `RestAuthenticationEntryPoint`, `RestAccessDeniedHandler`, CORS configuration).
   - ArchUnit architecture enforcement: verifies controllers do not directly call repositories and domain does not depend on web.
   - Frontend FSD auth slice: In-memory Zustand store, TanStack Query for user profile and available tenants, Axios request/response interceptors with concurrent 401 refresh queue, `LoginPage`, `RegisterPage`, `TenantSelectPage`, `ProtectedRoute` route guards.
-  - Automated test suite: 58 backend tests (PostgreSQL 16 Testcontainers) + 18 frontend Vitest tests, all passing with 100% success rate.
+  - Automated test suite: 59 backend tests (PostgreSQL 16 Testcontainers) + 20 frontend Vitest tests, all passing with 100% success rate.
