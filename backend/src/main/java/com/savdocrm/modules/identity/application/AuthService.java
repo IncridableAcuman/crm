@@ -49,6 +49,7 @@ public class AuthService {
     private final TenantRepository tenantRepository;
     private final BranchService branchService;
     private final TenantExecutionTemplate tenantExecutionTemplate;
+    private final TenantBootstrapService tenantBootstrapService;
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtProperties jwtProperties;
     private final PasswordEncoder passwordEncoder;
@@ -93,6 +94,7 @@ public class AuthService {
                     .timezone("UTC")
                     .status(TenantStatus.ACTIVE)
                     .build();
+            tenant.setCreatedBy(savedUser.getId());
 
             Tenant savedTenant = tenantRepository.save(tenant);
             createdTenantId = savedTenant.getId();
@@ -116,6 +118,9 @@ public class AuthService {
 
             TenantMembership savedMembership = tenantMembershipRepository.save(membership);
             createdMembershipId = savedMembership.getId();
+
+            // Initialize RBAC system roles and assign initial OWNER to creator membership
+            tenantBootstrapService.initializeNewTenantRbac(createdTenantId, createdMembershipId);
         }
 
         UUID tokenFamily = UUID.randomUUID();

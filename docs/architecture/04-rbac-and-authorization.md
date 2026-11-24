@@ -1,7 +1,7 @@
 # SAVDOCRM — Milestone 04: Role-Based Access Control (RBAC) & Scoped Permission Management Architecture
 
-- **Status**: Implemented & Verified Database Specification (M04.2)
-- **Version**: 1.2.0
+- **Status**: Core Domain & Authorization Engine Implemented & Verified (M04.3)
+- **Version**: 1.3.0
 - **Context**: Milestone 04 — Identity & Access Management (IAM)
 - **Related ADRs**: [ADR-0005](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0005-stateless-jwt-dual-phase-authentication.md), [ADR-0006](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0006-strict-single-use-refresh-token-rotation.md), [ADR-0007](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md)
 

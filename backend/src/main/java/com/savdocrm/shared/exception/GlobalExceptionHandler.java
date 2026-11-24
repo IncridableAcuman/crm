@@ -56,6 +56,82 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
+    @ExceptionHandler(com.savdocrm.modules.identity.domain.exception.PermissionDeniedException.class)
+    public ResponseEntity<ProblemDetail> handlePermissionDenied(com.savdocrm.modules.identity.domain.exception.PermissionDeniedException ex, HttpServletRequest request) {
+        log.warn("Permission denied: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Permission Denied");
+        problem.setType(URI.create("https://savdocrm.com/errors/permission-denied"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler(com.savdocrm.modules.identity.domain.exception.SystemRoleImmutableException.class)
+    public ResponseEntity<ProblemDetail> handleSystemRoleImmutable(com.savdocrm.modules.identity.domain.exception.SystemRoleImmutableException ex, HttpServletRequest request) {
+        log.warn("System role immutable: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("System Role Immutable");
+        problem.setType(URI.create("https://savdocrm.com/errors/system-role-immutable"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler(com.savdocrm.modules.identity.domain.exception.TenantBootstrapNotAllowedException.class)
+    public ResponseEntity<ProblemDetail> handleTenantBootstrapNotAllowed(com.savdocrm.modules.identity.domain.exception.TenantBootstrapNotAllowedException ex, HttpServletRequest request) {
+        log.warn("Tenant bootstrap not allowed: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("Tenant Bootstrap Not Allowed");
+        problem.setType(URI.create("https://savdocrm.com/errors/tenant-bootstrap-not-allowed"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler({
+            com.savdocrm.modules.identity.domain.exception.RoleNotFoundException.class,
+            com.savdocrm.modules.identity.domain.exception.PermissionNotFoundException.class
+    })
+    public ResponseEntity<ProblemDetail> handleNotFound(RuntimeException ex, HttpServletRequest request) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Not Found");
+        problem.setType(URI.create("https://savdocrm.com/errors/not-found"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+    }
+
+    @ExceptionHandler({
+            com.savdocrm.modules.identity.domain.exception.LastActiveOwnerException.class,
+            com.savdocrm.modules.identity.domain.exception.DuplicateRoleAssignmentException.class
+    })
+    public ResponseEntity<ProblemDetail> handleConflict(RuntimeException ex, HttpServletRequest request) {
+        log.warn("Conflict error: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Conflict");
+        problem.setType(URI.create("https://savdocrm.com/errors/conflict"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler({
+            com.savdocrm.modules.identity.domain.exception.InvalidRoleScopeException.class,
+            com.savdocrm.modules.identity.domain.exception.CrossTenantAssignmentException.class,
+            com.savdocrm.modules.identity.domain.exception.InactiveMembershipException.class
+    })
+    public ResponseEntity<ProblemDetail> handleRbacBadRequest(RuntimeException ex, HttpServletRequest request) {
+        log.warn("RBAC Bad Request: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Bad Request");
+        problem.setType(URI.create("https://savdocrm.com/errors/bad-request"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
     @ExceptionHandler(TenantContextMissingException.class)
     public ResponseEntity<ProblemDetail> handleTenantMissing(TenantContextMissingException ex, HttpServletRequest request) {
         log.warn("Tenant context missing: {}", ex.getMessage());

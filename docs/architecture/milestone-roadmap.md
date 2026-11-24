@@ -78,15 +78,29 @@ gantt
 ---
 
 ## Milestone 04: Scoped RBAC & Permissions
+- **Status**: Core Domain & Authorization Engine Implemented (M04.3 Completed)
+- **Sub-Milestones**:
+  - **M04.1**: Architecture & Scoping Specification (Completed).
+  - **M04.2**: Database Schema, Liquibase Migrations & Security Audit (Completed — migrations 09–15).
+  - **M04.3**: RBAC Core Domain & Authorization Engine (Completed):
+    - Domain entities: `Permission`, `Role`, `RolePermission`, `UserRoleAssignment`, `RoleScopeType`.
+    - Authorization Engine: `PermissionAuthorizationService` enforcing TENANT and BRANCH scopes, live entity statuses, and fail-closed security.
+    - Security Infrastructure: `RequestScopedPermissionMemoizer` for request-scoped zero-stale memoization.
+    - Concurrency Safety: 6-predicate Last Active OWNER invariant with pessimistic locking on parent tenant row (`findByIdWithLock`).
+    - Multi-Tenant Suspension: Deterministic UUID ordering (`ORDER BY tenant_id ASC`) preventing deadlocks during platform-wide user suspension in `UserService`.
+    - Lifecycle & Bootstrap: Atomic tenant registration RBAC bootstrap and existing tenant bootstrap in `TenantBootstrapService`.
+    - Role Management: `RoleAssignmentService` enforcing Grant-What-You-Hold, Owner Guard, self-elevation prevention, and historical audit preservation.
+  - **M04.4**: REST Controllers, Public Endpoints & Spring Security Integration (Pending).
+  - **M04.5**: Frontend RBAC Guards & Administration UI (Pending).
 - **Backend Objectives**:
-  - 4-tier permission hierarchy: Platform, Tenant, Branch, Warehouse.
-  - Entities: `Role`, `Permission`, `TenantMembership`, `MembershipRole` (scoped to `branch_id`).
-  - Custom `BranchSecurityEvaluator` preventing cross-branch access.
-  - Method-level security annotations (`@PreAuthorize`).
+  - 2-tier active scope hierarchy in M04: Tenant and Branch (Warehouse deferred until inventory module).
+  - Entities: `Role`, `Permission`, `RolePermission`, `UserRoleAssignment` (scoped to `branch_id`).
+  - System role immutability in domain aggregate.
+  - Fine-grained permission authorization engine.
 - **Frontend Objectives**:
   - Permission-aware UI element guards (`PermissionGuard`).
   - Role management and user invitation views.
-- **Deliverable**: Granular access control preventing unauthorized branch and warehouse access.
+- **Deliverable**: Granular access control preventing unauthorized branch access, preserving historical audit records, and guaranteeing tenant owner invariants.
 
 ---
 

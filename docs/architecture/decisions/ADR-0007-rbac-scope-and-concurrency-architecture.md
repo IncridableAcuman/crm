@@ -1,6 +1,6 @@
 # ADR-0007: RBAC Scope Isolation, Concurrency-Safe Owner Protection, and Permission Revocation
 
-- **Status**: Accepted
+- **Status**: Accepted & Implemented (M04.3)
 - **Date**: 2026-11-24
 - **Context**:
   In Milestone 04, SAVDOCRM transitions from identity authentication to authorization and access management. Initial design discussions revealed four critical architectural challenges:

@@ -17,4 +17,8 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID> {
     boolean existsByCode(String code);
 
     List<Tenant> findAllByStatus(TenantStatus status);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT t FROM Tenant t WHERE t.id = :id")
+    Optional<Tenant> findByIdWithLock(@org.springframework.data.repository.query.Param("id") UUID id);
 }
