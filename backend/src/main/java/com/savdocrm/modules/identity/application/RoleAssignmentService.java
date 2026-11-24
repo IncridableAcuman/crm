@@ -30,10 +30,15 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Application service for role assignment, revocation, privilege containment enforcement,
@@ -326,5 +331,46 @@ public class RoleAssignmentService {
                 .stream()
                 .anyMatch(a -> a.getScopeType() == RoleScopeType.TENANT
                         && roleRepository.findById(a.getRoleId()).map(Role::isOwner).orElse(false));
+    }
+
+    /**
+     * Retrieves all active role assignments in the specified tenant with resolved role codes and names.
+     */
+    @Transactional(readOnly = true)
+    public List<UserRoleAssignmentDto> getAssignmentsForTenant(UUID tenantId) {
+        List<UserRoleAssignment> assignments = userRoleAssignmentRepository.findAllByTenantIdAndIsActiveTrue(tenantId);
+        return mapAssignmentsToDtos(tenantId, assignments);
+    }
+
+    /**
+     * Retrieves all role assignments for a specific membership within a tenant.
+     */
+    @Transactional(readOnly = true)
+    public List<UserRoleAssignmentDto> getAssignmentsForMembership(UUID tenantId, UUID membershipId) {
+        TenantMembership membership = tenantMembershipRepository.findById(membershipId)
+                .orElseThrow(() -> new InactiveMembershipException("Membership not found with ID: " + membershipId));
+        if (!membership.getTenantId().equals(tenantId)) {
+            throw new CrossTenantAssignmentException("Target membership does not belong to tenant: " + tenantId);
+        }
+
+        List<UserRoleAssignment> assignments = userRoleAssignmentRepository.findAllByTenantIdAndMembershipId(tenantId, membershipId);
+        return mapAssignmentsToDtos(tenantId, assignments);
+    }
+
+    private List<UserRoleAssignmentDto> mapAssignmentsToDtos(UUID tenantId, List<UserRoleAssignment> assignments) {
+        if (assignments.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<UUID, Role> rolesById = roleRepository.findAllByTenantId(tenantId).stream()
+                .collect(Collectors.toMap(Role::getId, Function.identity()));
+
+        return assignments.stream()
+                .map(a -> {
+                    Role role = rolesById.get(a.getRoleId());
+                    String code = role != null ? role.getCode() : "UNKNOWN";
+                    String name = role != null ? role.getName() : "Unknown Role";
+                    return UserRoleAssignmentDto.fromEntity(a, code, name);
+                })
+                .toList();
     }
 }

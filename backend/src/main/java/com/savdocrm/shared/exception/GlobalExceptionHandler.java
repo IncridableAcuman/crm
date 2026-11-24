@@ -105,7 +105,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({
             com.savdocrm.modules.identity.domain.exception.LastActiveOwnerException.class,
-            com.savdocrm.modules.identity.domain.exception.DuplicateRoleAssignmentException.class
+            com.savdocrm.modules.identity.domain.exception.DuplicateRoleAssignmentException.class,
+            com.savdocrm.modules.identity.domain.exception.DuplicateRoleCodeException.class
     })
     public ResponseEntity<ProblemDetail> handleConflict(RuntimeException ex, HttpServletRequest request) {
         log.warn("Conflict error: {}", ex.getMessage());

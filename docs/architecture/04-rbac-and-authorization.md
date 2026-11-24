@@ -1,7 +1,7 @@
 # SAVDOCRM — Milestone 04: Role-Based Access Control (RBAC) & Scoped Permission Management Architecture
 
-- **Status**: Core Domain & Authorization Engine Implemented & Verified (M04.3)
-- **Version**: 1.3.0
+- **Status**: Core Domain, Authorization Engine, Role Management API & Method Security Implemented & Verified (M04.4)
+- **Version**: 1.4.0
 - **Context**: Milestone 04 — Identity & Access Management (IAM)
 - **Related ADRs**: [ADR-0005](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0005-stateless-jwt-dual-phase-authentication.md), [ADR-0006](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0006-strict-single-use-refresh-token-rotation.md), [ADR-0007](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md)
 
@@ -615,8 +615,7 @@ Base Path: `/api/v1`
 The implementation is executed strictly in sequence:
 - **M04.1 — RBAC Domain Design & Architecture Review** *(Completed & Approved)*
 - **M04.2 — Database Schema & Liquibase Migrations** *(Completed & Verified)*
-- **M04.3 — Core Permission Engine & Backend Authorization** *(Next Step)*
-- **M04.4 — Role Management API & Privilege Guards**
-- **M04.5 — User Role Assignment & Scope Enforcement**
-- **M04.6 — Frontend Role Management & UI Permission Gating**
-- **M04.7 — Security Tests, ArchUnit Rules & Final Verification**
+- **M04.3 — Core Permission Engine & Backend Authorization** *(Completed & Verified)*
+- **M04.4 — Role Management API & Method-Level Security** *(Completed & Verified)*
+- **M04.5 — Frontend Role Management & UI Permission Gating** *(Next Step)*
+- **M04.6 — Final Production Verification & Penetration Testing**

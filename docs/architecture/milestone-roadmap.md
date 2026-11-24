@@ -90,8 +90,8 @@ gantt
     - Multi-Tenant Suspension: Deterministic UUID ordering (`ORDER BY tenant_id ASC`) preventing deadlocks during platform-wide user suspension in `UserService`.
     - Lifecycle & Bootstrap: Atomic tenant registration RBAC bootstrap and existing tenant bootstrap in `TenantBootstrapService`.
     - Role Management: `RoleAssignmentService` enforcing Grant-What-You-Hold, Owner Guard, self-elevation prevention, and historical audit preservation.
-  - **M04.4**: REST Controllers, Public Endpoints & Spring Security Integration (Pending).
-  - **M04.5**: Frontend RBAC Guards & Administration UI (Pending).
+  - **M04.4**: REST Controllers, Role & Assignment APIs & Spring Security Integration (Completed & Verified).
+  - **M04.5**: Frontend RBAC Guards & Administration UI (Next Step).
 - **Backend Objectives**:
   - 2-tier active scope hierarchy in M04: Tenant and Branch (Warehouse deferred until inventory module).
   - Entities: `Role`, `Permission`, `RolePermission`, `UserRoleAssignment` (scoped to `branch_id`).

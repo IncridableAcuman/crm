@@ -26,7 +26,13 @@ public interface UserRoleAssignmentRepository extends TenantAwareRepository<User
 
     boolean existsByTenantIdAndRoleIdAndIsActiveTrue(UUID tenantId, UUID roleId);
 
+    boolean existsByTenantIdAndRoleId(UUID tenantId, UUID roleId);
+
     boolean existsByTenantIdAndBranchIdAndIsActiveTrue(UUID tenantId, UUID branchId);
+
+    List<UserRoleAssignment> findAllByTenantIdAndIsActiveTrue(UUID tenantId);
+
+    List<UserRoleAssignment> findAllByTenantId(UUID tenantId);
 
     @Query("""
         SELECT COUNT(DISTINCT m.id)
