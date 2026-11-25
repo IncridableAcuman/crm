@@ -180,12 +180,21 @@ class CatalogDatabaseMigrationIntegrationTest {
         );
     }
 
+    private int countInTenant(String tableName, UUID tenantId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + tableName + " WHERE tenant_id = ?",
+                Integer.class,
+                tenantId
+        );
+        return count == null ? 0 : count;
+    }
+
     @Nested
     @DisplayName("1. Schema Creation, Columns, Constraints, and Indexes")
     class SchemaVerificationTests {
 
         @Test
-        @DisplayName("Should create all 5 catalog tables and record changesets 16-21")
+        @DisplayName("Should create all 5 catalog tables and record changesets 16-22")
         void shouldCreateAllFiveCatalogTablesAndChangesets() {
             List<String> tables = jdbcTemplate.queryForList(
                     "SELECT table_name FROM information_schema.tables " +
@@ -201,7 +210,7 @@ class CatalogDatabaseMigrationIntegrationTest {
                     "product_barcodes"
             );
 
-            for (int i = 16; i <= 21; i++) {
+            for (int i = 16; i <= 22; i++) {
                 String prefix = String.format("v1.0.0-%02d-", i);
                 Integer count = jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM databasechangelog WHERE id LIKE ?",
@@ -245,7 +254,7 @@ class CatalogDatabaseMigrationIntegrationTest {
         }
 
         @Test
-        @DisplayName("Should configure RESTRICT delete rules on all 5 business foreign keys and CASCADE on tenant FKs")
+        @DisplayName("Should configure RESTRICT delete rules on all 5 tenant foreign keys and all 5 business foreign keys")
         void shouldHaveExpectedForeignKeyDeleteRules() {
             List<Map<String, Object>> fks = jdbcTemplate.queryForList(
                     "SELECT conname, confdeltype::text AS deltype " +
@@ -263,11 +272,11 @@ class CatalogDatabaseMigrationIntegrationTest {
                     )
             );
 
-            assertThat(fkRules).containsEntry("fk_product_categories_tenant", "c");
-            assertThat(fkRules).containsEntry("fk_units_of_measure_tenant", "c");
-            assertThat(fkRules).containsEntry("fk_products_tenant", "c");
-            assertThat(fkRules).containsEntry("fk_product_variants_tenant", "c");
-            assertThat(fkRules).containsEntry("fk_product_barcodes_tenant", "c");
+            assertThat(fkRules).containsEntry("fk_product_categories_tenant", "r");
+            assertThat(fkRules).containsEntry("fk_units_of_measure_tenant", "r");
+            assertThat(fkRules).containsEntry("fk_products_tenant", "r");
+            assertThat(fkRules).containsEntry("fk_product_variants_tenant", "r");
+            assertThat(fkRules).containsEntry("fk_product_barcodes_tenant", "r");
 
             assertThat(fkRules).containsEntry("fk_product_categories_parent", "r");
             assertThat(fkRules).containsEntry("fk_products_category", "r");
@@ -623,7 +632,77 @@ class CatalogDatabaseMigrationIntegrationTest {
     }
 
     @Nested
-    @DisplayName("6. Standard Units of Measure Seeding (Changeset 18)")
+    @DisplayName("6. Tenant Deletion Guard (ON DELETE RESTRICT)")
+    class TenantDeletionGuardTests {
+
+        @Test
+        @DisplayName("Should reject tenant deletion while catalog records exist and leave every record intact")
+        void shouldRejectTenantDeletionAndPreserveCatalogRecords() {
+            insertBarcode(UUID.randomUUID(), tenantAId, variantAId, "4607777777775", "EAN13", true);
+
+            assertThatThrownBy(() ->
+                    jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", tenantAId)
+            ).isInstanceOf(DataIntegrityViolationException.class);
+
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM tenants WHERE id = ?", Integer.class, tenantAId
+            )).isEqualTo(1);
+            assertThat(countInTenant("product_categories", tenantAId)).isEqualTo(1);
+            assertThat(countInTenant("units_of_measure", tenantAId)).isEqualTo(1);
+            assertThat(countInTenant("products", tenantAId)).isEqualTo(1);
+            assertThat(countInTenant("product_variants", tenantAId)).isEqualTo(1);
+            assertThat(countInTenant("product_barcodes", tenantAId)).isEqualTo(1);
+
+            // The other tenant's catalog data must be untouched
+            assertThat(countInTenant("product_categories", tenantBId)).isEqualTo(1);
+            assertThat(countInTenant("units_of_measure", tenantBId)).isEqualTo(1);
+            assertThat(countInTenant("products", tenantBId)).isEqualTo(1);
+            assertThat(countInTenant("product_variants", tenantBId)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should block tenant deletion when only a category or only a unit of measure remains")
+        void shouldBlockTenantDeletionOnSingleCatalogRow() {
+            UUID categoryOnlyTenantId = UUID.randomUUID();
+            insertTenant(categoryOnlyTenantId, "Category Only Tenant", "cat-only");
+            insertCategory(UUID.randomUUID(), categoryOnlyTenantId, null, "ONLY", "Only Category", 0);
+
+            UUID unitOnlyTenantId = UUID.randomUUID();
+            insertTenant(unitOnlyTenantId, "Unit Only Tenant", "unit-only");
+            insertUnit(UUID.randomUUID(), unitOnlyTenantId, "PCS", "Piece", "pcs", false, 0, true);
+
+            assertThatThrownBy(() ->
+                    jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", categoryOnlyTenantId)
+            ).isInstanceOf(DataIntegrityViolationException.class);
+
+            assertThatThrownBy(() ->
+                    jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", unitOnlyTenantId)
+            ).isInstanceOf(DataIntegrityViolationException.class);
+
+            assertThat(countInTenant("product_categories", categoryOnlyTenantId)).isEqualTo(1);
+            assertThat(countInTenant("units_of_measure", unitOnlyTenantId)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Should allow tenant deletion only after an explicit bottom-up catalog purge")
+        void shouldAllowTenantDeletionAfterExplicitBottomUpPurge() {
+            insertBarcode(UUID.randomUUID(), tenantAId, variantAId, "4607777777776", "EAN13", true);
+
+            jdbcTemplate.update("DELETE FROM product_barcodes WHERE tenant_id = ?", tenantAId);
+            jdbcTemplate.update("DELETE FROM product_variants WHERE tenant_id = ?", tenantAId);
+            jdbcTemplate.update("DELETE FROM products WHERE tenant_id = ?", tenantAId);
+            jdbcTemplate.update("DELETE FROM product_categories WHERE tenant_id = ?", tenantAId);
+            jdbcTemplate.update("DELETE FROM units_of_measure WHERE tenant_id = ?", tenantAId);
+
+            assertThat(jdbcTemplate.update("DELETE FROM tenants WHERE id = ?", tenantAId)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM tenants WHERE id = ?", Integer.class, tenantAId
+            )).isZero();
+        }
+    }
+
+    @Nested
+    @DisplayName("7. Standard Units of Measure Seeding (Changeset 18)")
     class StandardUnitSeedingTests {
 
         @Test

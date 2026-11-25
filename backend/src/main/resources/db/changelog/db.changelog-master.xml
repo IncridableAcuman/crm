@@ -27,5 +27,6 @@
     <include file="db/changelog/v1.0.0/19-create-products.xml"/>
     <include file="db/changelog/v1.0.0/20-create-product-variants.xml"/>
     <include file="db/changelog/v1.0.0/21-create-product-barcodes.xml"/>
+    <include file="db/changelog/v1.0.0/22-enforce-catalog-tenant-delete-restrict.xml"/>
 
 </databaseChangeLog>

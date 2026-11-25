@@ -1,8 +1,8 @@
 # SAVDOCRM — Milestone 05: Catalog Database Design & Schema Specification
 
-- **Status**: Implemented & Verified in M05.2 (Liquibase changesets `v1.0.0/16-*` through `v1.0.0/21-*`)
+- **Status**: Implemented & Verified in M05.2 (Liquibase changesets `v1.0.0/16-*` through `v1.0.0/21-*`, plus append-only integrity correction `v1.0.0-22-enforce-catalog-tenant-delete-restrict`)
 - **Version**: 1.0.0
-- **Target Migration**: Milestone 05.2 (`v1.0.0/16-create-product-categories.xml` through `v1.0.0/21-create-product-barcodes.xml`)
+- **Target Migration**: Milestone 05.2 (`v1.0.0/16-create-product-categories.xml` through `v1.0.0/21-create-product-barcodes.xml`, corrected by `v1.0.0/22-enforce-catalog-tenant-delete-restrict.xml`)
 - **Database Engine**: PostgreSQL 16+
 
 ---
@@ -17,7 +17,8 @@ All Catalog tables follow the SAVDOCRM shared-schema multi-tenancy standard esta
 4. **Precision Standards**:
    - Monetary values (`cost_price`, `selling_price`): `NUMERIC(15, 4)`
    - Quantities (used by downstream modules guided by UOM precision): `NUMERIC(12, 3)`
-5. **Non-Destructive Deletion**: Business references (`category_id`, `unit_id`, `parent_id`, and future `Inventory`/`Sales` references to `variant_id`) use `ON DELETE RESTRICT`.
+5. **Non-Destructive Deletion**: Every foreign key introduced by M05.2 uses `ON DELETE RESTRICT`. This covers both tenant ownership (`tenant_id -> tenants(id)`) on all five catalog tables and the five composite business relationships (`parent_id`, `category_id`, `unit_id`, `product_id`, `variant_id`, plus future `Inventory`/`Sales` references to `variant_id`). The catalog schema contains **no cascading delete behavior**.
+6. **Tenant Decommissioning**: Because tenant ownership FKs are `RESTRICT`, a `tenants` row referenced by any catalog record cannot be deleted. Tenant deletion must be handled by an explicit lifecycle operation that archives or purges catalog data in dependency order, never by implicit database cascading deletion. The tenant deletion API/lifecycle feature is out of scope for M05.2.
 
 ---
 
@@ -135,7 +136,7 @@ CREATE TABLE product_categories (
     CONSTRAINT uq_product_categories_tenant_id UNIQUE (tenant_id, id),
     CONSTRAINT uq_product_categories_tenant_code UNIQUE (tenant_id, code),
     CONSTRAINT fk_product_categories_tenant
-        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
     CONSTRAINT fk_product_categories_parent
         FOREIGN KEY (tenant_id, parent_id) REFERENCES product_categories(tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_product_categories_code_format
@@ -185,7 +186,7 @@ CREATE TABLE units_of_measure (
     CONSTRAINT uq_units_of_measure_tenant_id UNIQUE (tenant_id, id),
     CONSTRAINT uq_units_of_measure_tenant_code UNIQUE (tenant_id, code),
     CONSTRAINT fk_units_of_measure_tenant
-        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
     CONSTRAINT chk_units_of_measure_code_format
         CHECK (code ~ '^[A-Z0-9_-]{1,20}$'),
     CONSTRAINT chk_units_of_measure_name_not_blank
@@ -225,7 +226,7 @@ CREATE TABLE products (
 
     CONSTRAINT uq_products_tenant_id UNIQUE (tenant_id, id),
     CONSTRAINT fk_products_tenant
-        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
     CONSTRAINT fk_products_category
         FOREIGN KEY (tenant_id, category_id) REFERENCES product_categories(tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT fk_products_unit
@@ -288,7 +289,7 @@ CREATE TABLE product_variants (
     CONSTRAINT uq_product_variants_tenant_sku UNIQUE (tenant_id, sku),
     CONSTRAINT uq_product_variants_product_options UNIQUE (tenant_id, product_id, option_values),
     CONSTRAINT fk_product_variants_tenant
-        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
     CONSTRAINT fk_product_variants_product
         FOREIGN KEY (tenant_id, product_id) REFERENCES products(tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_product_variants_sku_format
@@ -327,7 +328,7 @@ CREATE TABLE product_barcodes (
     CONSTRAINT uq_product_barcodes_tenant_id UNIQUE (tenant_id, id),
     CONSTRAINT uq_product_barcodes_tenant_barcode UNIQUE (tenant_id, barcode),
     CONSTRAINT fk_product_barcodes_tenant
-        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
     CONSTRAINT fk_product_barcodes_variant
         FOREIGN KEY (tenant_id, variant_id) REFERENCES product_variants(tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT chk_product_barcodes_not_blank
@@ -362,12 +363,23 @@ CREATE INDEX idx_product_barcodes_tenant_variant
 
 | Foreign Key | Action | Rationale |
 | :--- | :--- | :--- |
-| `fk_*_tenant` -> `tenants(id)` | `CASCADE` | Hard tenant deletion cleanly removes tenant catalog records when child dependencies are absent or cleared bottom-up. |
+| `fk_*_tenant` -> `tenants(id)` | `RESTRICT` | Tenant deletion must never implicitly destroy catalog data. A `tenants` row cannot be removed while any category, unit, product, variant, or barcode references it; decommissioning requires an explicit lifecycle operation that archives or purges catalog records bottom-up first. |
 | `fk_product_categories_parent` -> `product_categories(tenant_id, id)` | `RESTRICT` | Prevents orphaned subtrees; parent cannot be deleted while children exist. |
 | `fk_products_category` -> `product_categories(tenant_id, id)` | `RESTRICT` | Prevents silent loss of product classification; categories with products must be deactivated, not deleted. |
 | `fk_products_unit` -> `units_of_measure(tenant_id, id)` | `RESTRICT` | Prevents deleting a unit of measure referenced by products. |
 | `fk_product_variants_product` -> `products(tenant_id, id)` | `RESTRICT` | M05.2 hardening override: prevents accidental physical cascade deletion of products that have variants; operational lifecycle transitions use `status = 'ARCHIVED'`. |
 | `fk_product_barcodes_variant` -> `product_variants(tenant_id, id)` | `RESTRICT` | M05.2 hardening override: prevents accidental physical cascade deletion of variants while barcodes remain attached; barcodes must be explicitly unassigned before variant purge. |
+
+**Deletion policy summary**: all ten M05.2 foreign keys are `ON DELETE RESTRICT`. PostgreSQL enforces deletion order bottom-up:
+
+1. `product_barcodes`
+2. `product_variants`
+3. `products`
+4. `product_categories`
+5. `units_of_measure`
+6. `tenants`
+
+Any attempt to delete a tenant that still owns catalog records is rejected with a foreign-key violation, and all rows remain intact. Operational catalog retirement should use `is_active` / `status = 'ARCHIVED'` rather than physical deletion. Tenant deletion itself is an explicit lifecycle operation and is **not** implemented in M05.2.
 
 ---
 

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-22-enforce-catalog-tenant-delete-restrict" author="savdocrm-catalog">
+        <comment>M05.2 integrity correction: replace ON DELETE CASCADE with ON DELETE RESTRICT on all five catalog tenant foreign keys so tenant deletion cannot implicitly destroy catalog records</comment>
+
+        <dropForeignKeyConstraint baseTableName="product_categories"
+                                  constraintName="fk_product_categories_tenant"/>
+        <addForeignKeyConstraint baseTableName="product_categories"
+                                 baseColumnNames="tenant_id"
+                                 constraintName="fk_product_categories_tenant"
+                                 referencedTableName="tenants"
+                                 referencedColumnNames="id"
+                                 onDelete="RESTRICT"/>
+
+        <dropForeignKeyConstraint baseTableName="units_of_measure"
+                                  constraintName="fk_units_of_measure_tenant"/>
+        <addForeignKeyConstraint baseTableName="units_of_measure"
+                                 baseColumnNames="tenant_id"
+                                 constraintName="fk_units_of_measure_tenant"
+                                 referencedTableName="tenants"
+                                 referencedColumnNames="id"
+                                 onDelete="RESTRICT"/>
+
+        <dropForeignKeyConstraint baseTableName="products"
+                                  constraintName="fk_products_tenant"/>
+        <addForeignKeyConstraint baseTableName="products"
+                                 baseColumnNames="tenant_id"
+                                 constraintName="fk_products_tenant"
+                                 referencedTableName="tenants"
+                                 referencedColumnNames="id"
+                                 onDelete="RESTRICT"/>
+
+        <dropForeignKeyConstraint baseTableName="product_variants"
+                                  constraintName="fk_product_variants_tenant"/>
+        <addForeignKeyConstraint baseTableName="product_variants"
+                                 baseColumnNames="tenant_id"
+                                 constraintName="fk_product_variants_tenant"
+                                 referencedTableName="tenants"
+                                 referencedColumnNames="id"
+                                 onDelete="RESTRICT"/>
+
+        <dropForeignKeyConstraint baseTableName="product_barcodes"
+                                  constraintName="fk_product_barcodes_tenant"/>
+        <addForeignKeyConstraint baseTableName="product_barcodes"
+                                 baseColumnNames="tenant_id"
+                                 constraintName="fk_product_barcodes_tenant"
+                                 referencedTableName="tenants"
+                                 referencedColumnNames="id"
+                                 onDelete="RESTRICT"/>
+
+        <rollback>
+            <!-- Restores the pre-correction M05.2 behavior only; catalog data is never dropped -->
+            <dropForeignKeyConstraint baseTableName="product_barcodes"
+                                      constraintName="fk_product_barcodes_tenant"/>
+            <addForeignKeyConstraint baseTableName="product_barcodes"
+                                     baseColumnNames="tenant_id"
+                                     constraintName="fk_product_barcodes_tenant"
+                                     referencedTableName="tenants"
+                                     referencedColumnNames="id"
+                                     onDelete="CASCADE"/>
+
+            <dropForeignKeyConstraint baseTableName="product_variants"
+                                      constraintName="fk_product_variants_tenant"/>
+            <addForeignKeyConstraint baseTableName="product_variants"
+                                     baseColumnNames="tenant_id"
+                                     constraintName="fk_product_variants_tenant"
+                                     referencedTableName="tenants"
+                                     referencedColumnNames="id"
+                                     onDelete="CASCADE"/>
+
+            <dropForeignKeyConstraint baseTableName="products"
+                                      constraintName="fk_products_tenant"/>
+            <addForeignKeyConstraint baseTableName="products"
+                                     baseColumnNames="tenant_id"
+                                     constraintName="fk_products_tenant"
+                                     referencedTableName="tenants"
+                                     referencedColumnNames="id"
+                                     onDelete="CASCADE"/>
+
+            <dropForeignKeyConstraint baseTableName="units_of_measure"
+                                      constraintName="fk_units_of_measure_tenant"/>
+            <addForeignKeyConstraint baseTableName="units_of_measure"
+                                     baseColumnNames="tenant_id"
+                                     constraintName="fk_units_of_measure_tenant"
+                                     referencedTableName="tenants"
+                                     referencedColumnNames="id"
+                                     onDelete="CASCADE"/>
+
+            <dropForeignKeyConstraint baseTableName="product_categories"
+                                      constraintName="fk_product_categories_tenant"/>
+            <addForeignKeyConstraint baseTableName="product_categories"
+                                     baseColumnNames="tenant_id"
+                                     constraintName="fk_product_categories_tenant"
+                                     referencedTableName="tenants"
+                                     referencedColumnNames="id"
+                                     onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
