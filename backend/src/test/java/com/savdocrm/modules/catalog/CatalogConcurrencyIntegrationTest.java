@@ -18,10 +18,14 @@ import com.savdocrm.modules.catalog.domain.ProductCategory;
 import com.savdocrm.modules.catalog.domain.ProductStatus;
 import com.savdocrm.modules.catalog.domain.ProductType;
 import com.savdocrm.modules.catalog.domain.ProductVariant;
+import com.savdocrm.modules.catalog.domain.exception.CategoryConflictException;
 import com.savdocrm.modules.catalog.domain.exception.CategoryHierarchyCycleException;
 import com.savdocrm.modules.catalog.domain.exception.DuplicateBarcodeException;
 import com.savdocrm.modules.catalog.domain.exception.DuplicateSkuException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidCategoryOperationException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidDefaultVariantTransitionException;
+import com.savdocrm.modules.catalog.domain.exception.MaxCategoryDepthExceededException;
+import com.savdocrm.modules.catalog.domain.exception.ProductBarcodeNotFoundException;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductBarcodeRepository;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductCategoryRepository;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductVariantRepository;
@@ -374,6 +378,188 @@ class CatalogConcurrencyIntegrationTest {
         assertThat(all.stream().filter(ProductBarcode::isPrimary).findFirst().orElseThrow().getId())
                 .isIn(b2.id(), b3.id())
                 .isNotEqualTo(b1.id());
+    }
+
+    @Test
+    @DisplayName("Concurrency 7: Concurrent child creation under a subtree being moved never violates max depth")
+    void concurrentChildCreationAndSubtreeMove_preserveDepthBounds() throws Exception {
+        for (int cycle = 0; cycle < 3; cycle++) {
+            final int idx = cycle;
+            CategoryDto d0 = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                    categoryService.createCategory(new CreateCategoryCommand(null, "D0_" + idx, "D0 " + idx, null, 0))
+            );
+            CategoryDto d1 = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                    categoryService.createCategory(new CreateCategoryCommand(d0.id(), "D1_" + idx, "D1 " + idx, null, 0))
+            );
+            CategoryDto d2 = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                    categoryService.createCategory(new CreateCategoryCommand(d1.id(), "D2_" + idx, "D2 " + idx, null, 0))
+            );
+            CategoryDto d3 = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                    categoryService.createCategory(new CreateCategoryCommand(d2.id(), "D3_" + idx, "D3 " + idx, null, 0))
+            );
+            CategoryDto moving = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                    categoryService.createCategory(new CreateCategoryCommand(null, "MOV_" + idx, "Moving " + idx, null, 0))
+            );
+
+            AtomicInteger successCount = new AtomicInteger(0);
+            AtomicInteger depthRejectedCount = new AtomicInteger(0);
+
+            runTwoConcurrentTasks(
+                    () -> {
+                        try {
+                            tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                                    categoryService.moveCategory(moving.id(), new MoveCategoryCommand(d3.id()))
+                            );
+                            successCount.incrementAndGet();
+                        } catch (MaxCategoryDepthExceededException ex) {
+                            depthRejectedCount.incrementAndGet();
+                        }
+                    },
+                    () -> {
+                        try {
+                            tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                                    categoryService.createCategory(new CreateCategoryCommand(moving.id(), "CHD_" + idx, "Child " + idx, null, 0))
+                            );
+                            successCount.incrementAndGet();
+                        } catch (MaxCategoryDepthExceededException ex) {
+                            depthRejectedCount.incrementAndGet();
+                        }
+                    }
+            );
+
+            assertThat(successCount.get()).isEqualTo(1);
+            assertThat(depthRejectedCount.get()).isEqualTo(1);
+
+            List<ProductCategory> all = categoryRepository.findAllByTenantIdOrderByDepthAscSortOrderAscNameAsc(tenantId);
+            assertThat(all).allSatisfy(c -> assertThat(c.getDepth()).isBetween(0, ProductCategory.MAX_DEPTH));
+        }
+    }
+
+    @Test
+    @DisplayName("Concurrency 8: Concurrent parent deactivation and child creation are mutually exclusive")
+    void concurrentParentDeactivationAndChildCreation_preventActiveChildUnderInactiveParent() throws Exception {
+        for (int cycle = 0; cycle < 3; cycle++) {
+            final int idx = cycle;
+            CategoryDto parent = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                    categoryService.createCategory(new CreateCategoryCommand(null, "PAR_" + idx, "Parent " + idx, null, 0))
+            );
+
+            AtomicInteger successCount = new AtomicInteger(0);
+            AtomicInteger rejectedCount = new AtomicInteger(0);
+
+            runTwoConcurrentTasks(
+                    () -> {
+                        try {
+                            tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                                    categoryService.deactivateCategory(parent.id())
+                            );
+                            successCount.incrementAndGet();
+                        } catch (CategoryConflictException ex) {
+                            rejectedCount.incrementAndGet();
+                        }
+                    },
+                    () -> {
+                        try {
+                            tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                                    categoryService.createCategory(new CreateCategoryCommand(parent.id(), "KID_" + idx, "Kid " + idx, null, 0))
+                            );
+                            successCount.incrementAndGet();
+                        } catch (InvalidCategoryOperationException ex) {
+                            rejectedCount.incrementAndGet();
+                        }
+                    }
+            );
+
+            assertThat(successCount.get()).isEqualTo(1);
+            assertThat(rejectedCount.get()).isEqualTo(1);
+
+            ProductCategory finalParent = categoryRepository.findByTenantIdAndId(tenantId, parent.id()).orElseThrow();
+            boolean hasActiveChild = categoryRepository.existsByTenantIdAndParentIdAndIsActiveTrue(tenantId, parent.id());
+            // Never allow active child under inactive parent
+            if (!finalParent.isActive()) {
+                assertThat(hasActiveChild).isFalse();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Concurrency 9: Concurrent subtree moves preserve depth == parent.depth + 1 across descendants")
+    void concurrentSubtreeMoves_preserveConsistentDescendantDepths() throws Exception {
+        CategoryDto branchA = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                categoryService.createCategory(new CreateCategoryCommand(null, "BR_A", "Branch A", null, 0))
+        );
+        CategoryDto branchB = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                categoryService.createCategory(new CreateCategoryCommand(null, "BR_B", "Branch B", null, 0))
+        );
+        CategoryDto branchBSub = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                categoryService.createCategory(new CreateCategoryCommand(branchB.id(), "BR_B1", "Branch B1", null, 0))
+        );
+        CategoryDto sub = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                categoryService.createCategory(new CreateCategoryCommand(null, "SUB_X", "Sub X", null, 0))
+        );
+        CategoryDto leaf = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                categoryService.createCategory(new CreateCategoryCommand(sub.id(), "LEAF_X", "Leaf X", null, 0))
+        );
+
+        runTwoConcurrentTasks(
+                () -> tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                        categoryService.moveCategory(sub.id(), new MoveCategoryCommand(branchA.id()))
+                ),
+                () -> tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                        categoryService.moveCategory(sub.id(), new MoveCategoryCommand(branchBSub.id()))
+                )
+        );
+
+        ProductCategory reloadedSub = categoryRepository.findByTenantIdAndId(tenantId, sub.id()).orElseThrow();
+        ProductCategory reloadedLeaf = categoryRepository.findByTenantIdAndId(tenantId, leaf.id()).orElseThrow();
+        ProductCategory reloadedParent = categoryRepository.findByTenantIdAndId(tenantId, reloadedSub.getParentId()).orElseThrow();
+
+        assertThat(reloadedSub.getDepth()).isEqualTo(reloadedParent.getDepth() + 1);
+        assertThat(reloadedLeaf.getDepth()).isEqualTo(reloadedSub.getDepth() + 1);
+    }
+
+    @Test
+    @DisplayName("Concurrency 10: Concurrent primary promotion vs barcode removal serialize cleanly without stale overwrite")
+    void concurrentBarcodePrimaryAndRemoval_serializeSafely() throws Exception {
+        ProductDto prod = tenantExecutionTemplate.executeAsTenant(tenantId, () -> productService.createProduct(
+                new CreateProductCommand(
+                        null, pcsUnitId, "Barcode Race Host", null, null, ProductType.SIMPLE, List.of(), ProductStatus.ACTIVE,
+                        List.of(new CreateVariantCommand("BR-HOST", "Def", Map.of(), BigDecimal.ZERO, BigDecimal.TEN, true, List.of()))
+                )
+        ));
+        UUID variantId = prod.variants().get(0).id();
+
+        ProductBarcodeDto b1 = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                barcodeService.addBarcode(variantId, new AddBarcodeCommand("RACE-B-1", BarcodeType.CODE128, true))
+        );
+        ProductBarcodeDto b2 = tenantExecutionTemplate.executeAsTenant(tenantId, () ->
+                barcodeService.addBarcode(variantId, new AddBarcodeCommand("RACE-B-2", BarcodeType.CODE128, false))
+        );
+
+        AtomicInteger removedFirstCount = new AtomicInteger(0);
+        runTwoConcurrentTasks(
+                () -> {
+                    try {
+                        tenantExecutionTemplate.executeAsTenant(tenantId, () -> barcodeService.setPrimaryBarcode(b2.id()));
+                    } catch (ProductBarcodeNotFoundException ex) {
+                        removedFirstCount.incrementAndGet();
+                    }
+                },
+                () -> tenantExecutionTemplate.executeAsTenant(tenantId, () -> barcodeService.removeBarcode(b2.id()))
+        );
+
+        // b2 must be deleted; b1 must never have been corrupted into an invalid state
+        assertThat(barcodeRepository.findByTenantIdAndId(tenantId, b2.id())).isEmpty();
+        List<ProductBarcode> remaining = barcodeRepository.findAllByTenantIdAndVariantIdOrderByIsPrimaryDescCreatedAtAsc(tenantId, variantId);
+        assertThat(remaining).hasSize(1);
+        assertThat(remaining.get(0).getId()).isEqualTo(b1.id());
+        if (removedFirstCount.get() == 0) {
+            // Promotion ran first, clearing b1 primary, then b2 was removed -> 0 primary barcodes
+            assertThat(remaining.get(0).isPrimary()).isFalse();
+        } else {
+            // Removal ran first, promotion failed with ProductBarcodeNotFoundException -> b1 remained primary
+            assertThat(remaining.get(0).isPrimary()).isTrue();
+        }
     }
 
     private void runTwoConcurrentTasks(Runnable task1, Runnable task2) throws Exception {

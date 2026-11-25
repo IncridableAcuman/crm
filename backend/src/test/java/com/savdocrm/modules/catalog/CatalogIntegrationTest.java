@@ -34,6 +34,7 @@ import com.savdocrm.modules.catalog.domain.exception.DuplicateCategoryException;
 import com.savdocrm.modules.catalog.domain.exception.DuplicateSkuException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidDefaultVariantTransitionException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidProductConfigurationException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidVariantConfigurationException;
 import com.savdocrm.modules.catalog.domain.exception.MaxCategoryDepthExceededException;
 import com.savdocrm.modules.catalog.domain.exception.ProductNotFoundException;
 import com.savdocrm.modules.catalog.domain.exception.SystemUnitImmutableException;
@@ -57,9 +58,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -112,14 +116,16 @@ class CatalogIntegrationTest {
     private ProductBarcodeService barcodeService;
     @Autowired
     private ProductQueryFacade queryFacade;
-    @Autowired
+    @MockitoSpyBean
     private ProductRepository productRepository;
-    @Autowired
+    @MockitoSpyBean
     private ProductVariantRepository variantRepository;
     @Autowired
     private ProductBarcodeRepository barcodeRepository;
     @Autowired
     private UnitOfMeasureRepository unitRepository;
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     private UUID tenantAId;
     private UUID tenantBId;
@@ -409,10 +415,48 @@ class CatalogIntegrationTest {
         ));
         assertThat(updatedV2.sku()).isEqualTo("RUN-43-BLU");
 
-        // Archiving product makes it non-sellable in facade
-        productService.archiveProduct(product.id());
+        // Archiving product preserves historical default while clearing active selectable default
+        ProductDto archivedDto = productService.archiveProduct(product.id());
+        assertThat(archivedDto.status()).isEqualTo(ProductStatus.ARCHIVED);
+        assertThat(archivedDto.activeDefaultVariant()).isEmpty();
+        assertThat(archivedDto.historicalDefaultVariant()).isPresent();
+        assertThat(archivedDto.historicalDefaultVariant().get().id()).isEqualTo(v2Id);
+        assertThat(archivedDto.historicalDefaultVariant().get().isActiveDefault()).isFalse();
+        assertThat(archivedDto.historicalDefaultVariant().get().isDefault()).isTrue();
+
         assertThat(queryFacade.findActiveVariantBySku("RUN-43-BLU")).isEmpty();
-        assertThat(queryFacade.findVariantById(v2Id).orElseThrow().sellable()).isFalse();
+        VariantCatalogDto archivedFacadeDto = queryFacade.findVariantById(v2Id).orElseThrow();
+        assertThat(archivedFacadeDto.sellable()).isFalse();
+        assertThat(archivedFacadeDto.activeDefault()).isFalse();
+
+        // Mutations on ARCHIVED product are rejected until restored
+        assertThatThrownBy(() -> variantService.addVariant(product.id(), new CreateVariantCommand(
+                "RUN-44-BLU", "44 / Blue", Map.of("Size", "44", "Color", "Blue"),
+                BigDecimal.TEN, BigDecimal.valueOf(85), false, List.of()
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> variantService.updateVariant(product.id(), v2Id, new UpdateVariantCommand(
+                "RUN-43-BLU", "43 / Blue", Map.of("Size", "43", "Color", "Blue"),
+                new BigDecimal("42.00"), new BigDecimal("85.00")
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> variantService.changeDefaultVariant(product.id(), v1Id))
+                .isInstanceOf(InvalidProductConfigurationException.class);
+
+        // Restoring archived product reactivates the historical default variant while keeping v1 inactive
+        ProductDto restored = productService.restoreProduct(product.id());
+        assertThat(restored.status()).isEqualTo(ProductStatus.ACTIVE);
+        assertThat(restored.activeDefaultVariant()).isPresent();
+        assertThat(restored.activeDefaultVariant().get().id()).isEqualTo(v2Id);
+        assertThat(restored.activeDefaultVariant().get().isActiveDefault()).isTrue();
+        assertThat(restored.variants().stream().filter(v -> v.id().equals(v1Id)).findFirst().orElseThrow().isActive())
+                .isFalse();
+        assertThat(queryFacade.findActiveVariantBySku("RUN-43-BLU")).isPresent();
+
+        // Re-archive and restore via changeProductStatus(..., ACTIVE)
+        productService.archiveProduct(product.id());
+        ProductDto restoredViaStatus = productService.changeProductStatus(product.id(), ProductStatus.ACTIVE);
+        assertThat(restoredViaStatus.status()).isEqualTo(ProductStatus.ACTIVE);
+        assertThat(restoredViaStatus.activeDefaultVariant()).isPresent();
+        assertThat(restoredViaStatus.activeDefaultVariant().get().id()).isEqualTo(v2Id);
 
         // Optimistic locking conflict check on stale Product version
         Product copy1 = productRepository.findByTenantIdAndId(tenantAId, product.id()).orElseThrow();
@@ -423,6 +467,138 @@ class CatalogIntegrationTest {
         copy2.updateMetadata(null, tenantAPcsUnitId, "Running Shoes Stale", null, "Runner");
         assertThatThrownBy(() -> productRepository.saveAndFlush(copy2))
                 .isInstanceOf(ObjectOptimisticLockingFailureException.class);
+    }
+
+    @Test
+    @DisplayName("SIMPLE product enforces single variant invariant across create, update, deactivate, and conversion")
+    void simpleProduct_variantCountInvariantEnforced() {
+        // Cannot create SIMPLE product with variantOptions or 2 variants
+        assertThatThrownBy(() -> productService.createProduct(new CreateProductCommand(
+                null, tenantAPcsUnitId, "Simple With Options", null, null, ProductType.SIMPLE, List.of("Size"), ProductStatus.ACTIVE,
+                List.of(new CreateVariantCommand("SIMP-OPT", "V1", Map.of(), BigDecimal.ONE, BigDecimal.TEN, true, List.of()))
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+
+        assertThatThrownBy(() -> productService.createProduct(new CreateProductCommand(
+                null, tenantAPcsUnitId, "Two Variant Simple", null, null, ProductType.SIMPLE, List.of(), ProductStatus.ACTIVE,
+                List.of(
+                        new CreateVariantCommand("SIMP-1", "V1", Map.of(), BigDecimal.ONE, BigDecimal.TEN, true, List.of()),
+                        new CreateVariantCommand("SIMP-2", "V2", Map.of(), BigDecimal.ONE, BigDecimal.TEN, false, List.of())
+                )
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+
+        ProductDto simple = productService.createProduct(new CreateProductCommand(
+                null, tenantAPcsUnitId, "Single Simple", null, null, ProductType.SIMPLE, List.of(), ProductStatus.ACTIVE,
+                List.of(new CreateVariantCommand("SIMP-ONLY", "Default", Map.of(), BigDecimal.ONE, BigDecimal.TEN, false, List.of()))
+        ));
+        assertThat(simple.variants()).hasSize(1);
+        UUID soleVariantId = simple.variants().get(0).id();
+        assertThat(simple.activeDefaultVariant()).isPresent();
+
+        // Cannot add second variant to SIMPLE product
+        assertThatThrownBy(() -> variantService.addVariant(simple.id(), new CreateVariantCommand(
+                "SIMP-EXTRA", "Extra", Map.of(), BigDecimal.ONE, BigDecimal.TEN, false, List.of()
+        ))).isInstanceOf(InvalidVariantConfigurationException.class);
+
+        // Cannot set option values on SIMPLE variant update
+        assertThatThrownBy(() -> variantService.updateVariant(simple.id(), soleVariantId, new UpdateVariantCommand(
+                "SIMP-ONLY", "Default", Map.of("Size", "L"), BigDecimal.ONE, BigDecimal.TEN
+        ))).isInstanceOf(InvalidVariantConfigurationException.class);
+
+        // Cannot deactivate sole variant of SIMPLE product
+        assertThatThrownBy(() -> variantService.deactivateVariant(simple.id(), soleVariantId))
+                .isInstanceOf(InvalidDefaultVariantTransitionException.class);
+
+        // Idempotent default selection on sole variant succeeds
+        assertThat(variantService.changeDefaultVariant(simple.id(), soleVariantId).isActiveDefault()).isTrue();
+
+        // Converting SIMPLE -> VARIABLE preserves variant ID and then permits adding a second variant
+        ProductDto converted = productService.convertSimpleToVariable(simple.id(), List.of("Size"), Map.of("Size", "M"));
+        assertThat(converted.productType()).isEqualTo(ProductType.VARIABLE);
+        assertThat(converted.variants().get(0).id()).isEqualTo(soleVariantId);
+
+        ProductVariantDto second = variantService.addVariant(simple.id(), new CreateVariantCommand(
+                "SIMP-L", "Large", Map.of("Size", "L"), BigDecimal.ONE, BigDecimal.valueOf(12), false, List.of()
+        ));
+        assertThat(second.productId()).isEqualTo(simple.id());
+        assertThat(variantService.listVariants(simple.id())).hasSize(2);
+
+        // Cannot re-convert an already VARIABLE product
+        assertThatThrownBy(() -> productService.convertSimpleToVariable(simple.id(), List.of("Color"), Map.of("Color", "Red")))
+                .isInstanceOf(InvalidProductConfigurationException.class);
+    }
+
+    @Test
+    @DisplayName("Archive and restore roll back atomically on persistence failure without leaving inconsistent default state")
+    void archiveAndRestore_rollBackAtomicallyOnFailure() {
+        ProductDto created = productService.createProduct(new CreateProductCommand(
+                null, tenantAPcsUnitId, "Rollback Product", null, null, ProductType.SIMPLE, List.of(), ProductStatus.ACTIVE,
+                List.of(new CreateVariantCommand("RB-PROD-1", "Default", Map.of(), BigDecimal.ONE, BigDecimal.TEN, true, List.of()))
+        ));
+        UUID variantId = created.variants().get(0).id();
+
+        org.mockito.Mockito.doThrow(new IllegalStateException("Simulated archive variant flush failure"))
+                .when(variantRepository)
+                .saveAllAndFlush(org.mockito.ArgumentMatchers.anyList());
+
+        assertThatThrownBy(() -> productService.archiveProduct(created.id()))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class)
+                .hasMessageContaining("Simulated archive variant flush failure");
+
+        org.mockito.Mockito.reset(variantRepository);
+        Product afterFailedArchive = productRepository.findByTenantIdAndId(tenantAId, created.id()).orElseThrow();
+        com.savdocrm.modules.catalog.domain.ProductVariant variantAfterFailedArchive =
+                variantRepository.findByTenantIdAndId(tenantAId, variantId).orElseThrow();
+        assertThat(afterFailedArchive.getStatus()).isEqualTo(ProductStatus.ACTIVE);
+        assertThat(variantAfterFailedArchive.isActive()).isTrue();
+        assertThat(variantAfterFailedArchive.isDefault()).isTrue();
+
+        // Archive cleanly, then simulate failure when saving Product during restore
+        productService.archiveProduct(created.id());
+
+        org.mockito.Mockito.doThrow(new IllegalStateException("Simulated restore product flush failure"))
+                .when(productRepository)
+                .saveAndFlush(org.mockito.ArgumentMatchers.any(Product.class));
+
+        assertThatThrownBy(() -> productService.restoreProduct(created.id()))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class)
+                .hasMessageContaining("Simulated restore product flush failure");
+
+        org.mockito.Mockito.reset(productRepository);
+        Product afterFailedRestore = productRepository.findByTenantIdAndId(tenantAId, created.id()).orElseThrow();
+        com.savdocrm.modules.catalog.domain.ProductVariant variantAfterFailedRestore =
+                variantRepository.findByTenantIdAndId(tenantAId, variantId).orElseThrow();
+        assertThat(afterFailedRestore.getStatus()).isEqualTo(ProductStatus.ARCHIVED);
+        assertThat(variantAfterFailedRestore.isActive()).isFalse();
+        assertThat(variantAfterFailedRestore.isDefault()).isTrue();
+    }
+
+    @Test
+    @DisplayName("ProductBarcodeRepository enforces tenant isolation on direct repository helpers")
+    void barcodeRepository_enforcesTenantIsolation() {
+        TenantContextHolder.setContext(TenantContext.of(tenantAId));
+        ProductDto prodA = productService.createProduct(new CreateProductCommand(
+                null, tenantAPcsUnitId, "Barcode Iso", null, null, ProductType.SIMPLE, List.of(), ProductStatus.ACTIVE,
+                List.of(new CreateVariantCommand(
+                        "BAR-ISO-1", "Default", Map.of(), BigDecimal.ONE, BigDecimal.TEN, true,
+                        List.of(new BarcodeInput("4608889990001", BarcodeType.EAN13, true))
+                ))
+        ));
+        UUID barcodeAId = prodA.variants().get(0).barcodes().get(0).id();
+
+        TenantContextHolder.setContext(TenantContext.of(tenantBId));
+        assertThat(barcodeRepository.findByIdInCurrentTenant(barcodeAId)).isEmpty();
+        assertThat(barcodeRepository.findAllInCurrentTenant(PageRequest.of(0, 10)).getContent()).isEmpty();
+        assertThat(barcodeRepository.existsByIdInCurrentTenant(barcodeAId)).isFalse();
+        java.util.Optional<com.savdocrm.modules.catalog.domain.ProductBarcode> lockedCrossTenant =
+                transactionTemplate.execute(status -> barcodeRepository.findByTenantIdAndIdWithLock(tenantBId, barcodeAId));
+        assertThat(lockedCrossTenant).isEmpty();
+        barcodeRepository.deleteByIdInCurrentTenant(barcodeAId);
+
+        TenantContextHolder.setContext(TenantContext.of(tenantAId));
+        assertThat(barcodeRepository.findByIdInCurrentTenant(barcodeAId)).isPresent();
+        assertThat(barcodeRepository.findAllInCurrentTenant(PageRequest.of(0, 10)).getContent())
+                .extracting(com.savdocrm.modules.catalog.domain.ProductBarcode::getId)
+                .containsExactly(barcodeAId);
     }
 
     @Test

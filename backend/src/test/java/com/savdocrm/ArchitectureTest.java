@@ -67,6 +67,12 @@ public class ArchitectureTest {
                     .because("Other bounded contexts must interact with Catalog through public application/facade contracts rather than Catalog repositories");
 
     @ArchTest
+    static final ArchRule identity_should_not_depend_on_catalog =
+            noClasses().that().resideInAPackage("..modules.identity..")
+                    .should().dependOnClassesThat().resideInAPackage("..modules.catalog..")
+                    .because("Identity should communicate tenant creation via TenantCreatedEvent rather than directly depending on Catalog");
+
+    @ArchTest
     static final ArchRule modules_should_have_no_circular_dependencies =
             SlicesRuleDefinition.slices()
                     .matching("com.savdocrm.modules.(*)..")

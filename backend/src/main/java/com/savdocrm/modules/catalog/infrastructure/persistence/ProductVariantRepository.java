@@ -34,6 +34,8 @@ public interface ProductVariantRepository extends TenantAwareRepository<ProductV
 
     List<ProductVariant> findAllByTenantIdAndIdIn(UUID tenantId, Collection<UUID> ids);
 
+    void deleteAllByTenantIdAndProductId(UUID tenantId, UUID productId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT v FROM ProductVariant v WHERE v.tenantId = :tenantId AND v.id = :id")
     Optional<ProductVariant> findByTenantIdAndIdWithLock(

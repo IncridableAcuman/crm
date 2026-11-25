@@ -1,6 +1,5 @@
 package com.savdocrm.modules.identity.application;
 
-import com.savdocrm.modules.catalog.application.UnitOfMeasureService;
 import com.savdocrm.modules.identity.application.dto.AuthResponse;
 import com.savdocrm.modules.identity.application.dto.LoginRequest;
 import com.savdocrm.modules.identity.application.dto.RefreshTokenRequest;
@@ -20,12 +19,14 @@ import com.savdocrm.modules.tenancy.application.BranchService;
 import com.savdocrm.modules.tenancy.application.dto.CreateBranchCommand;
 import com.savdocrm.modules.tenancy.domain.Tenant;
 import com.savdocrm.modules.tenancy.domain.TenantStatus;
+import com.savdocrm.modules.tenancy.domain.event.TenantCreatedEvent;
 import com.savdocrm.modules.tenancy.infrastructure.TenantRepository;
 import com.savdocrm.shared.multitenancy.TenantExecutionTemplate;
 import com.savdocrm.shared.security.JwtProperties;
 import com.savdocrm.shared.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -49,7 +50,7 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final TenantRepository tenantRepository;
     private final BranchService branchService;
-    private final UnitOfMeasureService unitOfMeasureService;
+    private final ApplicationEventPublisher eventPublisher;
     private final TenantExecutionTemplate tenantExecutionTemplate;
     private final TenantBootstrapService tenantBootstrapService;
     private final JwtTokenProvider jwtTokenProvider;
@@ -124,11 +125,8 @@ public class AuthService {
             // Initialize RBAC system roles and assign initial OWNER to creator membership
             tenantBootstrapService.initializeNewTenantRbac(createdTenantId, createdMembershipId);
 
-            // Seed the 8 standard catalog units of measure atomically for the new tenant
-            tenantExecutionTemplate.executeAsTenant(
-                    createdTenantId,
-                    unitOfMeasureService::initializeStandardUnitsForCurrentTenant
-            );
+            // Publish synchronous in-transaction TenantCreatedEvent so Catalog seeds the 8 standard UOMs
+            eventPublisher.publishEvent(new TenantCreatedEvent(createdTenantId));
         }
 
         UUID tokenFamily = UUID.randomUUID();

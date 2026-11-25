@@ -9,6 +9,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -63,16 +64,19 @@ public class Product extends BaseTenantEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "product_type", nullable = false, length = 20)
+    @Setter(AccessLevel.PACKAGE)
     private ProductType productType;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "variant_options", nullable = false)
     @Builder.Default
+    @Setter(AccessLevel.PACKAGE)
     private List<String> variantOptions = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
+    @Setter(AccessLevel.PACKAGE)
     private ProductStatus status = ProductStatus.ACTIVE;
 
     public static Product create(

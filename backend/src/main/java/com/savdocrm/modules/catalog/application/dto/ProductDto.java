@@ -6,6 +6,7 @@ import com.savdocrm.modules.catalog.domain.ProductType;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public record ProductDto(
@@ -23,6 +24,20 @@ public record ProductDto(
         Instant updatedAt,
         Long version
 ) {
+    public Optional<ProductVariantDto> activeDefaultVariant() {
+        if (this.status == ProductStatus.ARCHIVED || this.variants == null) {
+            return Optional.empty();
+        }
+        return this.variants.stream().filter(ProductVariantDto::isActiveDefault).findFirst();
+    }
+
+    public Optional<ProductVariantDto> historicalDefaultVariant() {
+        if (this.variants == null) {
+            return Optional.empty();
+        }
+        return this.variants.stream().filter(ProductVariantDto::isDefault).findFirst();
+    }
+
     public static ProductDto fromEntity(Product entity, List<ProductVariantDto> variants) {
         return new ProductDto(
                 entity.getId(),

@@ -17,6 +17,7 @@ import com.savdocrm.modules.catalog.domain.exception.InactiveUnitOfMeasureExcept
 import com.savdocrm.modules.catalog.domain.exception.InvalidCategoryOperationException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidDefaultVariantTransitionException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidProductConfigurationException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidVariantConfigurationException;
 import com.savdocrm.modules.catalog.domain.exception.ProductNotFoundException;
 import com.savdocrm.modules.catalog.domain.exception.UnitOfMeasureNotFoundException;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductBarcodeRepository;
@@ -92,6 +93,9 @@ public class ProductService {
 
         for (int i = 0; i < variantCommands.size(); i++) {
             CreateVariantCommand variantCmd = variantCommands.get(i);
+            if (variantCmd == null) {
+                throw new InvalidVariantConfigurationException("Variant command entry cannot be null.");
+            }
             boolean isDefault = command.productType() == ProductType.SIMPLE
                     || variantCmd.isDefault()
                     || (explicitDefaults == 0 && i == 0);
@@ -154,6 +158,9 @@ public class ProductService {
         if (targetStatus == ProductStatus.ARCHIVED) {
             return archiveLockedProduct(tenantId, product);
         }
+        if (product.getStatus() == ProductStatus.ARCHIVED && targetStatus == ProductStatus.ACTIVE) {
+            return restoreLockedProduct(tenantId, product);
+        }
 
         boolean hasActiveVariant = variantRepository.existsByTenantIdAndProductIdAndIsActiveTrue(tenantId, productId);
         product.transitionStatus(targetStatus, hasActiveVariant);
@@ -172,6 +179,17 @@ public class ProductService {
     }
 
     @Transactional
+    public ProductDto restoreProduct(UUID productId) {
+        UUID tenantId = TenantContextHolder.getRequiredTenantId();
+        Product product = productRepository.findByTenantIdAndIdWithLock(tenantId, productId)
+                .orElseThrow(() -> new ProductNotFoundException(productId));
+        if (product.getStatus() != ProductStatus.ARCHIVED) {
+            throw new InvalidProductConfigurationException("Only ARCHIVED products can be restored.");
+        }
+        return restoreLockedProduct(tenantId, product);
+    }
+
+    @Transactional
     public ProductDto convertSimpleToVariable(
             UUID productId,
             List<String> newVariantOptions,
@@ -181,16 +199,25 @@ public class ProductService {
         Product product = productRepository.findByTenantIdAndIdWithLock(tenantId, productId)
                 .orElseThrow(() -> new ProductNotFoundException(productId));
 
+        if (product.isArchived()) {
+            throw new InvalidProductConfigurationException("Cannot convert an ARCHIVED product; restore it first.");
+        }
+
         List<ProductVariant> variants = variantRepository.findAllByTenantIdAndProductIdWithLock(tenantId, productId);
-        if (variants.isEmpty()) {
-            throw new InvalidProductConfigurationException("Product has no default variant.");
+        if (variants.size() != 1) {
+            throw new InvalidProductConfigurationException(
+                    "SIMPLE product must have exactly one default variant before conversion."
+            );
         }
 
         product.convertToVariable(newVariantOptions);
         UUID actorUserId = CatalogActorResolver.resolveOptionalActorUserId();
         product.setUpdatedBy(actorUserId);
 
-        ProductVariant defaultVariant = variants.get(0);
+        ProductVariant defaultVariant = variants.stream()
+                .filter(ProductVariant::isDefault)
+                .findFirst()
+                .orElseThrow(() -> new InvalidProductConfigurationException("Product has no default variant."));
         defaultVariant.updateOptionValues(product, existingDefaultOptionValues);
         defaultVariant.setUpdatedBy(actorUserId);
 
@@ -218,11 +245,11 @@ public class ProductService {
         barcodeRepository.flush();
 
         if (!variants.isEmpty()) {
-            variantRepository.deleteAll(variants);
+            variantRepository.deleteAllByTenantIdAndProductId(tenantId, productId);
             variantRepository.flush();
         }
 
-        productRepository.delete(product);
+        productRepository.deleteByTenantIdAndId(tenantId, productId);
     }
 
     @Transactional(readOnly = true)
@@ -259,6 +286,29 @@ public class ProductService {
         return assembleProductDto(tenantId, saved);
     }
 
+    private ProductDto restoreLockedProduct(UUID tenantId, Product product) {
+        UUID actorUserId = CatalogActorResolver.resolveOptionalActorUserId();
+        List<ProductVariant> variants = variantRepository.findAllByTenantIdAndProductIdWithLock(tenantId, product.getId());
+
+        ProductVariant historicalDefault = variants.stream()
+                .filter(ProductVariant::isDefault)
+                .findFirst()
+                .orElseThrow(() -> new InvalidProductConfigurationException(
+                        "Cannot restore product without a historical default variant."
+                ));
+
+        if (!historicalDefault.isActive()) {
+            historicalDefault.activate();
+            historicalDefault.setUpdatedBy(actorUserId);
+            variantRepository.saveAndFlush(historicalDefault);
+        }
+
+        product.transitionStatus(ProductStatus.ACTIVE, true);
+        product.setUpdatedBy(actorUserId);
+        Product saved = productRepository.saveAndFlush(product);
+        return assembleProductDto(tenantId, saved);
+    }
+
     private ProductDto assembleProductDto(UUID tenantId, Product product) {
         List<ProductVariant> variants = variantRepository
                 .findAllByTenantIdAndProductIdOrderByIsDefaultDescCreatedAtAsc(tenantId, product.getId());
@@ -266,7 +316,9 @@ public class ProductService {
         Map<UUID, List<ProductBarcodeDto>> barcodesByVariant = variantHelper.loadBarcodesByVariantIds(tenantId, variantIds);
 
         List<ProductVariantDto> variantDtos = variants.stream()
-                .map(v -> ProductVariantDto.fromEntity(v, barcodesByVariant.getOrDefault(v.getId(), List.of())))
+                .map(v -> ProductVariantDto.fromEntity(
+                        v, product.getStatus(), barcodesByVariant.getOrDefault(v.getId(), List.of())
+                ))
                 .toList();
         return ProductDto.fromEntity(product, variantDtos);
     }

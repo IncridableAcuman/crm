@@ -81,7 +81,7 @@ class CatalogVariantHelper {
         List<ProductBarcodeDto> savedBarcodes = persistInitialBarcodes(
                 tenantId, savedVariant.getId(), command.barcodes(), actorUserId
         );
-        return ProductVariantDto.fromEntity(savedVariant, savedBarcodes);
+        return ProductVariantDto.fromEntity(savedVariant, product.getStatus(), savedBarcodes);
     }
 
     List<ProductBarcodeDto> persistInitialBarcodes(

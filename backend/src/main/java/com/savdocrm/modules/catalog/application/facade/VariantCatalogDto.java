@@ -26,6 +26,7 @@ public record VariantCatalogDto(
         BigDecimal sellingPrice,
         ProductStatus productStatus,
         boolean variantActive,
+        boolean activeDefault,
         boolean sellable
 ) {
 }

@@ -95,6 +95,9 @@ public class ProductCategoryService {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
         Objects.requireNonNull(command, "UpdateCategoryCommand cannot be null.");
 
+        // Enforce uniform Tenant -> ProductCategory lock order across all category mutations
+        lockTenant(tenantId);
+
         ProductCategory category = categoryRepository.findByTenantIdAndIdWithLock(tenantId, categoryId)
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
 

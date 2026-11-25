@@ -7,6 +7,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -62,10 +63,12 @@ public class ProductVariant extends BaseTenantEntity {
 
     @Column(name = "is_default", nullable = false)
     @Builder.Default
+    @Setter(AccessLevel.PACKAGE)
     private boolean isDefault = false;
 
     @Column(name = "is_active", nullable = false)
     @Builder.Default
+    @Setter(AccessLevel.PACKAGE)
     private boolean isActive = true;
 
     public static ProductVariant create(

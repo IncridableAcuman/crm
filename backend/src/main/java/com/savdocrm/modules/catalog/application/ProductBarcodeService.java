@@ -67,11 +67,15 @@ public class ProductBarcodeService {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
         Objects.requireNonNull(command, "UpdateBarcodeCommand cannot be null.");
 
-        ProductBarcode barcode = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
+        ProductBarcode initial = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
-        variantRepository.findByTenantIdAndIdWithLock(tenantId, barcode.getVariantId())
-                .orElseThrow(() -> new ProductVariantNotFoundException(barcode.getVariantId()));
+        variantRepository.findByTenantIdAndIdWithLock(tenantId, initial.getVariantId())
+                .orElseThrow(() -> new ProductVariantNotFoundException(initial.getVariantId()));
+
+        // Re-load under owning variant lock to avoid acting on a stale pre-lock snapshot
+        ProductBarcode barcode = barcodeRepository.findByTenantIdAndIdWithLock(tenantId, barcodeId)
+                .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
         String normalized = CatalogValidation.normalizeBarcode(command.barcode());
         if (barcodeRepository.existsByTenantIdAndBarcodeAndIdNot(tenantId, normalized, barcodeId)) {
@@ -97,11 +101,15 @@ public class ProductBarcodeService {
     public ProductBarcodeDto setPrimaryBarcode(UUID barcodeId) {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
 
-        ProductBarcode barcode = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
+        ProductBarcode initial = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
-        variantRepository.findByTenantIdAndIdWithLock(tenantId, barcode.getVariantId())
-                .orElseThrow(() -> new ProductVariantNotFoundException(barcode.getVariantId()));
+        variantRepository.findByTenantIdAndIdWithLock(tenantId, initial.getVariantId())
+                .orElseThrow(() -> new ProductVariantNotFoundException(initial.getVariantId()));
+
+        // Re-load under owning variant lock to avoid stale pre-lock state
+        ProductBarcode barcode = barcodeRepository.findByTenantIdAndIdWithLock(tenantId, barcodeId)
+                .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
         if (barcode.isPrimary()) {
             return ProductBarcodeDto.fromEntity(barcode);
@@ -124,13 +132,16 @@ public class ProductBarcodeService {
     public void removeBarcode(UUID barcodeId) {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
 
-        ProductBarcode barcode = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
+        ProductBarcode initial = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
-        variantRepository.findByTenantIdAndIdWithLock(tenantId, barcode.getVariantId())
-                .orElseThrow(() -> new ProductVariantNotFoundException(barcode.getVariantId()));
+        variantRepository.findByTenantIdAndIdWithLock(tenantId, initial.getVariantId())
+                .orElseThrow(() -> new ProductVariantNotFoundException(initial.getVariantId()));
 
-        barcodeRepository.delete(barcode);
+        ProductBarcode barcode = barcodeRepository.findByTenantIdAndIdWithLock(tenantId, barcodeId)
+                .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
+
+        barcodeRepository.deleteByTenantIdAndId(tenantId, barcode.getId());
         barcodeRepository.flush();
     }
 

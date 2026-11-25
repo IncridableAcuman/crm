@@ -4,6 +4,7 @@ import com.savdocrm.modules.catalog.application.dto.AddBarcodeCommand;
 import com.savdocrm.modules.catalog.application.dto.CreateVariantCommand;
 import com.savdocrm.modules.catalog.application.dto.ProductBarcodeDto;
 import com.savdocrm.modules.catalog.application.dto.ProductVariantDto;
+import com.savdocrm.modules.catalog.application.dto.UpdateVariantCommand;
 import com.savdocrm.modules.catalog.domain.BarcodeType;
 import com.savdocrm.modules.catalog.domain.Product;
 import com.savdocrm.modules.catalog.domain.ProductBarcode;
@@ -13,6 +14,7 @@ import com.savdocrm.modules.catalog.domain.ProductVariant;
 import com.savdocrm.modules.catalog.domain.exception.DuplicateBarcodeException;
 import com.savdocrm.modules.catalog.domain.exception.DuplicateVariantOptionsException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidDefaultVariantTransitionException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidProductConfigurationException;
 import com.savdocrm.modules.catalog.domain.exception.InvalidVariantConfigurationException;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductBarcodeRepository;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductRepository;
@@ -145,6 +147,7 @@ class ProductVariantAndBarcodeServiceTest {
         secondary.setId(UUID.randomUUID());
 
         when(barcodeRepository.findByTenantIdAndId(tenantId, secondary.getId())).thenReturn(Optional.of(secondary));
+        when(barcodeRepository.findByTenantIdAndIdWithLock(tenantId, secondary.getId())).thenReturn(Optional.of(secondary));
         when(barcodeRepository.findByTenantIdAndVariantIdAndIsPrimaryTrue(tenantId, variantId)).thenReturn(Optional.of(oldPrimary));
         when(barcodeRepository.saveAndFlush(any(ProductBarcode.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -153,6 +156,30 @@ class ProductVariantAndBarcodeServiceTest {
         assertThat(oldPrimary.isPrimary()).isFalse();
 
         barcodeService.removeBarcode(secondary.getId());
-        verify(barcodeRepository).delete(secondary);
+        verify(barcodeRepository).deleteByTenantIdAndId(tenantId, secondary.getId());
+    }
+
+    @Test
+    @DisplayName("Archived product rejects variant mutations until restored")
+    void archivedProduct_rejectsVariantMutations() {
+        UUID prodId = UUID.randomUUID();
+        Product archived = Product.create(tenantId, null, UUID.randomUUID(), "Archived", null, null, ProductType.VARIABLE, List.of("Size"), ProductStatus.ACTIVE);
+        archived.setId(prodId);
+        archived.transitionStatus(ProductStatus.ARCHIVED, false);
+
+        when(productRepository.findByTenantIdAndIdWithLock(tenantId, prodId)).thenReturn(Optional.of(archived));
+
+        assertThatThrownBy(() -> variantService.addVariant(prodId, new CreateVariantCommand(
+                "ARC-1", "S", Map.of("Size", "S"), BigDecimal.ONE, BigDecimal.TEN, false, List.of()
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> variantService.updateVariant(prodId, UUID.randomUUID(), new UpdateVariantCommand(
+                "ARC-1", "S", Map.of("Size", "S"), BigDecimal.ONE, BigDecimal.TEN
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> variantService.changeDefaultVariant(prodId, UUID.randomUUID()))
+                .isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> variantService.deactivateVariant(prodId, UUID.randomUUID()))
+                .isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> variantService.activateVariant(prodId, UUID.randomUUID()))
+                .isInstanceOf(InvalidProductConfigurationException.class);
     }
 }

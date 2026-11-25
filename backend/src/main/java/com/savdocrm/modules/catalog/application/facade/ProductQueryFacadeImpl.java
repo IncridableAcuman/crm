@@ -132,6 +132,7 @@ public class ProductQueryFacadeImpl implements ProductQueryFacade {
 
     private VariantCatalogDto toDto(Product product, ProductVariant variant, UnitOfMeasure unit, String primaryBarcode) {
         boolean sellable = product.getStatus() == ProductStatus.ACTIVE && variant.isActive();
+        boolean activeDefault = product.getStatus() != ProductStatus.ARCHIVED && variant.isDefault() && variant.isActive();
         Map<String, String> options = variant.getOptionValues() == null
                 ? Collections.emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(variant.getOptionValues()));
@@ -152,6 +153,7 @@ public class ProductQueryFacadeImpl implements ProductQueryFacade {
                 variant.getSellingPrice(),
                 product.getStatus(),
                 variant.isActive(),
+                activeDefault,
                 sellable
         );
     }

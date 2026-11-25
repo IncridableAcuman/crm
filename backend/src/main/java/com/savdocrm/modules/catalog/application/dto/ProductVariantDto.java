@@ -1,5 +1,6 @@
 package com.savdocrm.modules.catalog.application.dto;
 
+import com.savdocrm.modules.catalog.domain.ProductStatus;
 import com.savdocrm.modules.catalog.domain.ProductVariant;
 
 import java.math.BigDecimal;
@@ -19,19 +20,25 @@ public record ProductVariantDto(
         BigDecimal costPrice,
         BigDecimal sellingPrice,
         boolean isDefault,
+        boolean isActiveDefault,
         boolean isActive,
         List<ProductBarcodeDto> barcodes,
         Instant createdAt,
         Instant updatedAt,
         Long version
 ) {
-    public static ProductVariantDto fromEntity(ProductVariant entity, List<ProductBarcodeDto> barcodes) {
+    public static ProductVariantDto fromEntity(
+            ProductVariant entity,
+            ProductStatus productStatus,
+            List<ProductBarcodeDto> barcodes
+    ) {
         Map<String, String> safeOptions = entity.getOptionValues() == null
                 ? Collections.emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(entity.getOptionValues()));
         List<ProductBarcodeDto> safeBarcodes = barcodes == null
                 ? Collections.emptyList()
                 : List.copyOf(barcodes);
+        boolean activeDefault = productStatus != ProductStatus.ARCHIVED && entity.isDefault() && entity.isActive();
         return new ProductVariantDto(
                 entity.getId(),
                 entity.getProductId(),
@@ -41,6 +48,7 @@ public record ProductVariantDto(
                 entity.getCostPrice(),
                 entity.getSellingPrice(),
                 entity.isDefault(),
+                activeDefault,
                 entity.isActive(),
                 safeBarcodes,
                 entity.getCreatedAt(),
