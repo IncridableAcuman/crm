@@ -1,7 +1,7 @@
 # SAVDOCRM — Milestone 05: Product Catalog & Category Management Architecture
 
-- **Status**: M05.1–M05.3 Implemented (Domain Model, Repositories, Core Services & Public Facade); M05.4 REST API & M05.5 Frontend Pending
-- **Version**: 1.1.0
+- **Status**: M05.1–M05.4 Implemented (Domain Model, Repositories, Core Services, Public Facade, REST API & RBAC); M05.5 Frontend Pending
+- **Version**: 1.2.0
 - **Context**: Milestone 05 — `Catalog` Bounded Context (`com.savdocrm.modules.catalog`)
 - **Related ADRs**:
   - [ADR-0008](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0008-catalog-product-aggregate-and-variant-model.md)
@@ -327,6 +327,12 @@ graph LR
 ### 10.5 New-Tenant UOM Bootstrap
 - Both `AuthService.register` and `TenantService.createTenant` publish a synchronous in-transaction `TenantCreatedEvent`, handled by `CatalogTenantBootstrapListener` -> `UnitOfMeasureService.initializeStandardUnitsForCurrentTenant()` via `TenantExecutionTemplate`. This establishes a single authoritative, idempotent UOM bootstrap mechanism with zero direct `Identity -> Catalog` dependency; any failure rolls back tenant registration/creation atomically.
 
-### 10.6 Known Limitations & Deferred Scope (M05.4+)
-- **Deferred to M05.4**: REST controllers (`/api/v1/products`, `/api/v1/categories`, `/api/v1/units`), HTTP pagination/search/POS lookup endpoints, MapStruct web DTOs, and `PermissionAuthorizationService.hasAnyScopePermission` RBAC wiring.
+### 10.6 Implemented M05.4 REST API & RBAC Integration
+- **Controllers (`com.savdocrm.modules.catalog.web`)**: `ProductController` (`/api/v1/products`), `ProductVariantController` (`/api/v1/products/{productId}/variants`), `ProductCategoryController` (`/api/v1/categories`), and `UnitOfMeasureController` (`/api/v1/units`).
+- **DTOs & MapStruct**: Request/response records under `web.dto.request` / `web.dto.response` mapped via `CatalogWebMapper`, wrapped in `ApiResponse<T>` and `PageResponse<T>` with RFC 7807 `ProblemDetail` errors.
+- **Database-Level Pagination & Tree Query (`CatalogQueryService`)**: Paginated product search uses `JpaSpecificationExecutor<Product>` (`tenantId`-scoped `Criteria` + escaped `LIKE` + `IN`/subqueries), allowlisted sort fields (`name`, `createdAt`, `updatedAt`, `status`, `brand`, `productType`), and O(1) batch assembly; category tree assembly builds the hierarchy in memory from a single sorted query.
+- **RBAC Scope Enforcement**: Catalog read endpoints require `TENANT` scope (`hasPermission`) when optional `branchId` is omitted and evaluate `hasBranchPermission` when `branchId` is provided (so single-branch assignments cannot grant unrestricted tenant-wide access without `?branchId=`), while all catalog writes enforce `TENANT` scope via `hasPermission` (with archive and draft deletion gated by `catalog.products.delete`).
+
+### 10.7 Known Limitations & Deferred Scope (M05.5+)
+- **M05.4 Behavioral Notes**: `DELETE /api/v1/products/{productId}` physically deletes `DRAFT` products only (`ACTIVE` products use `POST /archive` or `PATCH /status`); UOM writes reuse `catalog.categories.manage` (`TENANT` scope) per `ADR-0010` without adding a 34th permission.
 - **Deferred to M05.5 / M06+**: Frontend FSD UI, image upload/storage, inventory stock ledger, pricing history, and multi-unit UOM conversions.

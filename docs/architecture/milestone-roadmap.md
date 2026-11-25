@@ -109,7 +109,7 @@ gantt
 ---
 
 ## Milestone 05: Product Catalog & Category Management
-- **Status**: Domain Model, Repositories & Core Services Completed (M05.1–M05.3 Completed; M05.4–M05.6 Planned)
+- **Status**: Backend Domain, Services, REST API & RBAC Completed (M05.1–M05.4 Completed; M05.5–M05.6 Planned)
 - **Sub-Milestones**:
   - **M05.1 — Architecture & Domain Design** *(Completed — Design-Only)*:
     - **Scope**: Bounded context definition, `Product`/`ProductVariant`/`ProductBarcode`/`Category`/`UnitOfMeasure` domain model, database schema, REST API & RBAC contracts, frontend FSD blueprint, and ADRs (`ADR-0008`–`ADR-0010`).
@@ -126,10 +126,10 @@ gantt
     - **Dependencies**: M05.2.
     - **Tests & Acceptance Criteria**: Domain unit tests, Mockito application service tests, Testcontainers PostgreSQL 16 integration & concurrency tests, UOM bootstrap rollback test, and ArchUnit module boundary checks.
     - **Exclusions**: HTTP controllers, REST pagination/search endpoints, RBAC endpoint wiring, and frontend UI.
-  - **M05.4 — Product & Category REST API & RBAC Integration** *(Planned)*:
-    - **Scope**: `ProductController`, `CategoryController`, `UnitController`, DTOs, MapStruct mappers, `PermissionAuthorizationService.hasAnyScopePermission` for branch-scoped catalog reads, and `@PreAuthorize` enforcement on all endpoints.
+  - **M05.4 — Product & Category REST API & RBAC Integration** *(Completed & Verified)*:
+    - **Scope**: `ProductController`, `ProductVariantController`, `ProductCategoryController`, `UnitOfMeasureController`, `CatalogQueryService`, `PageResponse<T>`, validated request/response DTOs, `CatalogWebMapper` (MapStruct), strict `TENANT` (`hasPermission`) / optional-`branchId` (`hasBranchPermission`) enforcement for catalog reads, and `@PreAuthorize` `TENANT`-scope enforcement on all catalog writes (including `catalog.products.delete` for archive/delete).
     - **Dependencies**: M05.3.
-    - **Tests & Acceptance Criteria**: MockMvc integration tests covering pagination/search/lookup, `400`/`403`/`404`/`409` RFC7807 errors, branch-scoped reader vs tenant-scoped writer RBAC enforcement, and ArchUnit checks.
+    - **Tests & Acceptance Criteria**: MockMvc PostgreSQL 16 Testcontainers integration tests (`CatalogWebApiIntegrationTest`, `CatalogRbacSecurityIntegrationTest`, `PermissionAuthorizationServiceTest`) covering database pagination/filtering/allowlisted sorting, single-query category tree, lifecycle & aggregate ownership invariants, `400`/`401`/`403`/`404`/`409` RFC7807 errors, `TENANT`/`BRANCH`/wrong-branch/suspended/cross-tenant RBAC checks, and ArchUnit checks.
     - **Exclusions**: Frontend UI, Inventory stock, Sales/Purchases.
   - **M05.5 — Product & Category Frontend (FSD)** *(Planned)*:
     - **Scope**: `entities/{product,category,unit}`, `features/catalog/*`, `widgets/{product-table,category-tree}`, `pages/catalog/*`, `PermissionRoute` + `PermissionGuard` integration, and Vitest + production build verification.

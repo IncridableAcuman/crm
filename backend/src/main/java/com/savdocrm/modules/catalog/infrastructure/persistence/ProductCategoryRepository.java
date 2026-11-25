@@ -34,6 +34,8 @@ public interface ProductCategoryRepository extends TenantAwareRepository<Product
 
     List<ProductCategory> findAllByTenantIdAndParentIdIn(UUID tenantId, Collection<UUID> parentIds);
 
+    List<ProductCategory> findAllByTenantIdAndIdIn(UUID tenantId, Collection<UUID> ids);
+
     List<ProductCategory> findAllByTenantIdOrderByDepthAscSortOrderAscNameAsc(UUID tenantId);
 
     List<ProductCategory> findAllByTenantIdAndIsActiveTrueOrderByDepthAscSortOrderAscNameAsc(UUID tenantId);

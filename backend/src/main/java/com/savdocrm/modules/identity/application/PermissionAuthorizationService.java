@@ -51,6 +51,21 @@ public interface PermissionAuthorizationService {
     boolean hasBranchPermission(UUID tenantId, UUID membershipId, String permissionCode, UUID branchId);
 
     /**
+     * Evaluates whether the currently authenticated principal possesses the specified permission
+     * at TENANT scope OR on at least one active BRANCH within the active tenant.
+     * Used for tenant-shared catalog read endpoints accessed by branch-scoped roles (CASHIER, MANAGER, WAREHOUSE_MANAGER).
+     *
+     * @param permissionCode Canonical dot notation permission code
+     * @return true if authorized at TENANT scope or on at least one active BRANCH, false otherwise
+     */
+    boolean hasAnyScopePermission(String permissionCode);
+
+    /**
+     * Explicit any-scope authorization evaluation for a specific membership.
+     */
+    boolean hasAnyScopePermission(UUID tenantId, UUID membershipId, String permissionCode);
+
+    /**
      * Retrieves all active permission codes granted at store-wide TENANT scope for the membership.
      */
     Set<String> getEffectiveTenantPermissions(UUID tenantId, UUID membershipId);

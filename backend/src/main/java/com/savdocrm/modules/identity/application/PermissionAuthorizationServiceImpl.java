@@ -82,6 +82,21 @@ public class PermissionAuthorizationServiceImpl implements PermissionAuthorizati
 
     @Override
     @Transactional(readOnly = true)
+    public boolean hasAnyScopePermission(String permissionCode) {
+        if (permissionCode == null || permissionCode.isBlank()) {
+            return false;
+        }
+
+        ResolvedContext context = resolveCurrentContext();
+        if (context == null) {
+            return false;
+        }
+
+        return hasAnyScopePermission(context.tenantId(), context.membershipId(), permissionCode);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public boolean hasPermission(UUID tenantId, UUID membershipId, String permissionCode) {
         if (tenantId == null || membershipId == null || permissionCode == null || permissionCode.isBlank()) {
             return false;
@@ -143,6 +158,47 @@ public class PermissionAuthorizationServiceImpl implements PermissionAuthorizati
 
         if (isRequestScopeActive()) {
             memoizer.putCachedCheck(tenantId, membershipId, permissionCode, "BRANCH", branchId, granted);
+        }
+
+        return granted;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasAnyScopePermission(UUID tenantId, UUID membershipId, String permissionCode) {
+        if (tenantId == null || membershipId == null || permissionCode == null || permissionCode.isBlank()) {
+            return false;
+        }
+
+        if (isRequestScopeActive()) {
+            Boolean cached = memoizer.getCachedCheck(tenantId, membershipId, permissionCode, "ANY_SCOPE", null);
+            if (cached != null) {
+                return cached;
+            }
+        }
+
+        Set<String> tenantPermissions = getEffectiveTenantPermissions(tenantId, membershipId);
+        if (tenantPermissions.contains(permissionCode)) {
+            if (isRequestScopeActive()) {
+                memoizer.putCachedCheck(tenantId, membershipId, permissionCode, "ANY_SCOPE", null, true);
+            }
+            return true;
+        }
+
+        Map<UUID, Set<String>> branchPermissions = getEffectiveBranchPermissions(tenantId, membershipId);
+        boolean granted = false;
+        for (Map.Entry<UUID, Set<String>> entry : branchPermissions.entrySet()) {
+            if (entry.getValue().contains(permissionCode)) {
+                Branch branch = branchRepository.findByTenantIdAndId(tenantId, entry.getKey()).orElse(null);
+                if (branch != null && branch.isActive()) {
+                    granted = true;
+                    break;
+                }
+            }
+        }
+
+        if (isRequestScopeActive()) {
+            memoizer.putCachedCheck(tenantId, membershipId, permissionCode, "ANY_SCOPE", null, granted);
         }
 
         return granted;

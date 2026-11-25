@@ -56,9 +56,19 @@ public class ArchitectureTest {
                             "..modules.parties..",
                             "..modules.finance..",
                             "..modules.analytics..",
-                            "..web.."
+                            "..modules.tenancy.web.."
                     )
-                    .because("Catalog bounded context may only depend on shared and tenancy, never identity, downstream modules, or web controllers");
+                    .because("Catalog bounded context may only depend on shared and tenancy core, never identity, downstream modules, or other modules' web controllers");
+
+    @ArchTest
+    static final ArchRule catalog_core_layers_should_not_depend_on_web =
+            noClasses().that().resideInAnyPackage(
+                            "..modules.catalog.domain..",
+                            "..modules.catalog.application..",
+                            "..modules.catalog.infrastructure.."
+                    )
+                    .should().dependOnClassesThat().resideInAnyPackage("..web..", "org.springframework.web..")
+                    .because("Catalog domain, application, and infrastructure layers must remain decoupled from web/HTTP concerns");
 
     @ArchTest
     static final ArchRule other_modules_should_not_access_catalog_repositories_directly =

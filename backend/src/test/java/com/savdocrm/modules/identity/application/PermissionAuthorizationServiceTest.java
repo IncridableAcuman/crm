@@ -455,4 +455,96 @@ class PermissionAuthorizationServiceTest {
             RequestContextHolder.resetRequestAttributes();
         }
     }
+
+    @Test
+    @DisplayName("hasAnyScopePermission grants access for TENANT or active BRANCH assignment and denies inactive branches")
+    void testHasAnyScopePermission() {
+        Role cashierRole = roleRepository.findByTenantIdAndCode(testTenant.getId(), SystemRoles.CASHIER).orElseThrow();
+
+        UserRoleAssignment branchAssign = UserRoleAssignment.builder()
+                .membershipId(testMembership.getId())
+                .roleId(cashierRole.getId())
+                .scopeType(RoleScopeType.BRANCH)
+                .branchId(branchA.getId())
+                .isActive(true)
+                .build();
+        branchAssign.setTenantId(testTenant.getId());
+        userRoleAssignmentRepository.save(branchAssign);
+
+        // Strict TENANT-scope check is false, while any-scope check is true for CASHIER on active branchA
+        assertThat(permissionAuthorizationService.hasPermission(Permissions.CATALOG_PRODUCTS_READ)).isFalse();
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_PRODUCTS_READ)).isTrue();
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_CATEGORIES_READ)).isTrue();
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_PRODUCTS_CREATE)).isFalse();
+
+        // Deactivating branchA causes hasAnyScopePermission to fail closed
+        branchA.deactivate();
+        branchRepository.save(branchA);
+        simulateNewRequest();
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_PRODUCTS_READ)).isFalse();
+
+        // Missing tenant context fails closed
+        TenantContextHolder.clear();
+        simulateNewRequest();
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_PRODUCTS_READ)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Unknown or unseeded permission codes fail closed even for active OWNER and memoizer isolates scope keys")
+    void testUnseededPermissionFailsClosedAndMemoizerScopeIsolation() {
+        Role ownerRole = roleRepository.findByTenantIdAndCode(testTenant.getId(), SystemRoles.OWNER).orElseThrow();
+        UserRoleAssignment ownerAssign = UserRoleAssignment.builder()
+                .membershipId(testMembership.getId())
+                .roleId(ownerRole.getId())
+                .scopeType(RoleScopeType.TENANT)
+                .branchId(null)
+                .isActive(true)
+                .build();
+        ownerAssign.setTenantId(testTenant.getId());
+        userRoleAssignmentRepository.save(ownerAssign);
+
+        assertThat(permissionAuthorizationService.hasPermission("catalog.products.manage")).isFalse();
+        assertThat(permissionAuthorizationService.hasBranchPermission("catalog.products.manage", branchA.getId())).isFalse();
+        assertThat(permissionAuthorizationService.hasAnyScopePermission("catalog.products.manage")).isFalse();
+        assertThat(permissionAuthorizationService.hasPermission("catalog.unknown.action")).isFalse();
+
+        // New user with BRANCH-scoped CASHIER assignment on branchA only
+        User branchUser = userRepository.save(User.builder()
+                .username("branch_memo_" + UUID.randomUUID().toString().substring(0, 8))
+                .email("branch_memo_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com")
+                .passwordHash("hashed")
+                .firstName("Branch")
+                .lastName("Memo")
+                .status(UserStatus.ACTIVE)
+                .build());
+        TenantMembership branchMem = tenantMembershipRepository.save(TenantMembership.builder()
+                .tenantId(testTenant.getId())
+                .userId(branchUser.getId())
+                .status(MembershipStatus.ACTIVE)
+                .build());
+        Role cashierRole = roleRepository.findByTenantIdAndCode(testTenant.getId(), SystemRoles.CASHIER).orElseThrow();
+        UserRoleAssignment branchAssign = UserRoleAssignment.builder()
+                .membershipId(branchMem.getId())
+                .roleId(cashierRole.getId())
+                .scopeType(RoleScopeType.BRANCH)
+                .branchId(branchA.getId())
+                .isActive(true)
+                .build();
+        branchAssign.setTenantId(testTenant.getId());
+        userRoleAssignmentRepository.save(branchAssign);
+
+        setupSecurityContext(testTenant.getId(), branchMem.getId(), branchUser.getId());
+
+        // Within the same HTTP request, ANY_SCOPE, BRANCH(A), BRANCH(B), and TENANT checks remain isolated
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_PRODUCTS_READ)).isTrue();
+        assertThat(permissionAuthorizationService.hasPermission(Permissions.CATALOG_PRODUCTS_READ)).isFalse();
+        assertThat(permissionAuthorizationService.hasBranchPermission(Permissions.CATALOG_PRODUCTS_READ, branchA.getId())).isTrue();
+        assertThat(permissionAuthorizationService.hasBranchPermission(Permissions.CATALOG_PRODUCTS_READ, branchB.getId())).isFalse();
+        assertThat(permissionAuthorizationService.hasBranchPermission("catalog.products.manage", branchA.getId())).isFalse();
+
+        // Switching membership/tenant context mid-request does not leak cached permissions from owner/previous member
+        setupSecurityContext(UUID.randomUUID(), branchMem.getId(), branchUser.getId());
+        assertThat(permissionAuthorizationService.hasAnyScopePermission(Permissions.CATALOG_PRODUCTS_READ)).isFalse();
+        assertThat(permissionAuthorizationService.hasBranchPermission(Permissions.CATALOG_PRODUCTS_READ, branchA.getId())).isFalse();
+    }
 }
