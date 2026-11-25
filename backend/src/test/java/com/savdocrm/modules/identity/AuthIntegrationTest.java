@@ -124,6 +124,11 @@ class AuthIntegrationTest {
     }
 
     private void cleanDatabase() {
+        jdbcTemplate.execute("DELETE FROM product_barcodes");
+        jdbcTemplate.execute("DELETE FROM product_variants");
+        jdbcTemplate.execute("DELETE FROM products");
+        jdbcTemplate.execute("DELETE FROM product_categories");
+        jdbcTemplate.execute("DELETE FROM units_of_measure");
         refreshTokenRepository.deleteAll();
         tenantMembershipRepository.deleteAll();
         branchRepository.deleteAll();

@@ -1,7 +1,7 @@
 # SAVDOCRM — Milestone 05: Product Catalog & Category Management Architecture
 
-- **Status**: Architecture & Domain Design Approved (M05.1)
-- **Version**: 1.0.0
+- **Status**: M05.1–M05.3 Implemented (Domain Model, Repositories, Core Services & Public Facade); M05.4 REST API & M05.5 Frontend Pending
+- **Version**: 1.1.0
 - **Context**: Milestone 05 — `Catalog` Bounded Context (`com.savdocrm.modules.catalog`)
 - **Related ADRs**:
   - [ADR-0008](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0008-catalog-product-aggregate-and-variant-model.md)
@@ -295,3 +295,36 @@ graph LR
 - **`VariantCatalogDto`** exposes: `variantId`, `productId`, `productName`, `variantName`, `sku`, `primaryBarcode`, `optionValues`, `unitId`, `unitCode`, `unitSymbol`, `allowDecimal`, `decimalPrecision`, `referenceCostPrice`, `sellingPrice`, `productStatus`, `variantActive`, `sellable` (`productStatus == ACTIVE && variantActive`).
 - **Zero Circular Dependencies**: `Inventory`, `Sales`, and `Purchases` depend on `Catalog`'s public facade DTOs; `Catalog` has zero dependencies on any downstream module.
 - **Cross-Module Deletion Hook (M06+)**: When `Inventory` and `Sales` are introduced, PostgreSQL `ON DELETE RESTRICT` FKs (`inventory_stocks.variant_id`, `inventory_transactions.variant_id`, `sale_items.variant_id`, `purchase_order_items.variant_id`) physically prevent deleting referenced variants, and `ProductService.deleteOrArchiveProduct` falls back to `ARCHIVED` on constraint/reference detection (mirroring M04's `RoleService.deleteOrDeactivateRole` pattern).
+
+---
+
+## 10. Implemented M05.3 Domain, Services & Concurrency Architecture
+
+### 10.1 Implemented Entities & Aggregate Boundaries
+- **`ProductCategory` (`product_categories`, extends `BaseTenantEntity`)**: Independent aggregate root managing adjacency-list classification (`parentId`, `depth` `0..4`, `sortOrder`, `isActive`).
+- **`UnitOfMeasure` (`units_of_measure`, extends `BaseTenantEntity`)**: Independent aggregate root managing tenant-owned units, `decimalPrecision` (`0..3`), `allowDecimal` consistency, and `isSystem` immutability (`PCS`, `KG`, `G`, `L`, `ML`, `M`, `BOX`, `PACK`).
+- **`Product` (`products`, extends `BaseTenantEntity`)**: Aggregate root owning `ProductType` (`SIMPLE` | `VARIABLE`), `ProductStatus` (`DRAFT` | `ACTIVE` | `ARCHIVED`), and bounded `variantOptions` JSONB (`0` for `SIMPLE`, `1..3` unique non-blank keys for `VARIABLE`).
+- **`ProductVariant` (`product_variants`, extends `BaseTenantEntity`)**: Child entity belonging to `Product` (`productId` UUID FK), owning normalized uppercase `sku`, `optionValues` JSONB, `BigDecimal` `NUMERIC(15,4)` `costPrice`/`sellingPrice`, `isDefault`, and `isActive`.
+- **`ProductBarcode` (`product_barcodes`)**: Child entity belonging to `ProductVariant` (`variantId` UUID FK). Matches the M05.2 schema by omitting `@Version`; concurrent primary-barcode updates are serialized by locking the owning `ProductVariant` (`findByTenantIdAndIdWithLock`).
+
+### 10.2 Repositories & Tenant Isolation
+- `ProductCategoryRepository`, `UnitOfMeasureRepository`, `ProductRepository`, and `ProductVariantRepository` extend `TenantAwareRepository<T, UUID>`.
+- `ProductBarcodeRepository` exposes strictly `tenantId`-scoped queries (`findByTenantIdAndId`, `findByTenantIdAndBarcode`, `existsByTenantIdAndBarcode`, `findAllByTenantIdAndVariantId...`).
+- All application services (`ProductCategoryService`, `UnitOfMeasureService`, `ProductService`, `ProductVariantService`, `ProductBarcodeService`) and `ProductQueryFacadeImpl` resolve `tenantId` exclusively from `TenantContextHolder.getRequiredTenantId()`, failing closed with `TenantContextMissingException` when absent and returning `*NotFoundException` (or `Optional.empty()` in facade queries) for cross-tenant IDs.
+
+### 10.3 Category Hierarchy Integrity
+- Structural category operations (`createCategory`, `moveCategory`, `deactivateCategory`, `activateCategory`, `deleteCategory`) acquire a pessimistic write lock on the owning `Tenant` row (`TenantRepository.findByIdWithLock`) to serialize concurrent hierarchy moves and prevent `A -> B` / `B -> A` race cycles.
+- `moveCategory` walks at most `MAX_DEPTH + 1` ancestor hops via `findByTenantIdAndId` (cycle detection) and traverses only the moved node's subtree level-by-level via `findAllByTenantIdAndParentIdIn` (avoiding full-tree loading) to validate `newDepth + subtreeHeight <= 4` and atomically shift descendant depths.
+
+### 10.4 Product/Variant Invariants, Transactions & Concurrency
+- All mutating operations run inside `@Transactional` application service boundaries.
+- `ProductService.createProduct` atomically validates and persists the `Product`, its initial `ProductVariant`(s) (enforcing `>= 1` variant and `== 1` default variant), and initial `ProductBarcode`(s); any failure rolls back the entire aggregate.
+- `ProductVariantService` acquires `PESSIMISTIC_WRITE` on the parent `Product` (`findByTenantIdAndIdWithLock`) before adding, updating, deactivating, or changing the default variant, unmarking the old default with `saveAndFlush` prior to promoting the new active default.
+- `CatalogConstraintTranslator` translates PostgreSQL unique-constraint race exceptions (`uq_product_variants_tenant_sku`, `uq_product_variants_product_options`, `uq_product_barcodes_tenant_barcode`, etc.) into domain exceptions without exposing SQL details.
+
+### 10.5 New-Tenant UOM Bootstrap
+- `AuthService.register` (via `TenantExecutionTemplate`) and `TenantService.createTenant` (via synchronous `TenantCreatedEvent` handled in-transaction by `CatalogTenantBootstrapListener`) invoke `UnitOfMeasureService.initializeStandardUnitsForCurrentTenant()` idempotently. Any failure rolls back tenant registration atomically.
+
+### 10.6 Known Limitations & Deferred Scope (M05.4+)
+- **Deferred to M05.4**: REST controllers (`/api/v1/products`, `/api/v1/categories`, `/api/v1/units`), HTTP pagination/search/POS lookup endpoints, MapStruct web DTOs, and `PermissionAuthorizationService.hasAnyScopePermission` RBAC wiring.
+- **Deferred to M05.5 / M06+**: Frontend FSD UI, image upload/storage, inventory stock ledger, pricing history, and multi-unit UOM conversions.

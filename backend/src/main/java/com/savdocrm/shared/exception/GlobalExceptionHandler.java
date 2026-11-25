@@ -1,11 +1,36 @@
 package com.savdocrm.shared.exception;
 
+import com.savdocrm.modules.catalog.domain.exception.CategoryConflictException;
+import com.savdocrm.modules.catalog.domain.exception.CategoryHierarchyCycleException;
+import com.savdocrm.modules.catalog.domain.exception.CategoryNotFoundException;
+import com.savdocrm.modules.catalog.domain.exception.CrossTenantCatalogException;
+import com.savdocrm.modules.catalog.domain.exception.DuplicateBarcodeException;
+import com.savdocrm.modules.catalog.domain.exception.DuplicateCategoryException;
+import com.savdocrm.modules.catalog.domain.exception.DuplicateSkuException;
+import com.savdocrm.modules.catalog.domain.exception.DuplicateUnitCodeException;
+import com.savdocrm.modules.catalog.domain.exception.DuplicateVariantOptionsException;
+import com.savdocrm.modules.catalog.domain.exception.InactiveUnitOfMeasureException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidBarcodeException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidCategoryOperationException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidDefaultVariantTransitionException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidPrimaryBarcodeTransitionException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidProductConfigurationException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidVariantConfigurationException;
+import com.savdocrm.modules.catalog.domain.exception.MaxCategoryDepthExceededException;
+import com.savdocrm.modules.catalog.domain.exception.ProductBarcodeNotFoundException;
+import com.savdocrm.modules.catalog.domain.exception.ProductNotFoundException;
+import com.savdocrm.modules.catalog.domain.exception.ProductVariantNotFoundException;
+import com.savdocrm.modules.catalog.domain.exception.SystemUnitImmutableException;
+import com.savdocrm.modules.catalog.domain.exception.UnitOfMeasureConflictException;
+import com.savdocrm.modules.catalog.domain.exception.UnitOfMeasureNotFoundException;
 import com.savdocrm.shared.multitenancy.TenantContextMissingException;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -78,6 +103,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 
+    @ExceptionHandler(SystemUnitImmutableException.class)
+    public ResponseEntity<ProblemDetail> handleSystemUnitImmutable(SystemUnitImmutableException ex, HttpServletRequest request) {
+        log.warn("System unit immutable: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
+        problem.setTitle("System Unit Immutable");
+        problem.setType(URI.create("https://savdocrm.com/errors/system-unit-immutable"));
+        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setProperty("timestamp", Instant.now().toString());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
     @ExceptionHandler(com.savdocrm.modules.identity.domain.exception.TenantBootstrapNotAllowedException.class)
     public ResponseEntity<ProblemDetail> handleTenantBootstrapNotAllowed(com.savdocrm.modules.identity.domain.exception.TenantBootstrapNotAllowedException ex, HttpServletRequest request) {
         log.warn("Tenant bootstrap not allowed: {}", ex.getMessage());
@@ -91,7 +127,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({
             com.savdocrm.modules.identity.domain.exception.RoleNotFoundException.class,
-            com.savdocrm.modules.identity.domain.exception.PermissionNotFoundException.class
+            com.savdocrm.modules.identity.domain.exception.PermissionNotFoundException.class,
+            CategoryNotFoundException.class,
+            UnitOfMeasureNotFoundException.class,
+            ProductNotFoundException.class,
+            ProductVariantNotFoundException.class,
+            ProductBarcodeNotFoundException.class
     })
     public ResponseEntity<ProblemDetail> handleNotFound(RuntimeException ex, HttpServletRequest request) {
         log.warn("Resource not found: {}", ex.getMessage());
@@ -106,7 +147,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             com.savdocrm.modules.identity.domain.exception.LastActiveOwnerException.class,
             com.savdocrm.modules.identity.domain.exception.DuplicateRoleAssignmentException.class,
-            com.savdocrm.modules.identity.domain.exception.DuplicateRoleCodeException.class
+            com.savdocrm.modules.identity.domain.exception.DuplicateRoleCodeException.class,
+            CategoryHierarchyCycleException.class,
+            DuplicateCategoryException.class,
+            CategoryConflictException.class,
+            DuplicateUnitCodeException.class,
+            UnitOfMeasureConflictException.class,
+            DuplicateSkuException.class,
+            DuplicateVariantOptionsException.class,
+            InvalidDefaultVariantTransitionException.class,
+            DuplicateBarcodeException.class,
+            InvalidPrimaryBarcodeTransitionException.class,
+            ObjectOptimisticLockingFailureException.class,
+            OptimisticLockException.class
     })
     public ResponseEntity<ProblemDetail> handleConflict(RuntimeException ex, HttpServletRequest request) {
         log.warn("Conflict error: {}", ex.getMessage());
@@ -121,10 +174,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             com.savdocrm.modules.identity.domain.exception.InvalidRoleScopeException.class,
             com.savdocrm.modules.identity.domain.exception.CrossTenantAssignmentException.class,
-            com.savdocrm.modules.identity.domain.exception.InactiveMembershipException.class
+            com.savdocrm.modules.identity.domain.exception.InactiveMembershipException.class,
+            MaxCategoryDepthExceededException.class,
+            InvalidCategoryOperationException.class,
+            InactiveUnitOfMeasureException.class,
+            InvalidProductConfigurationException.class,
+            InvalidVariantConfigurationException.class,
+            InvalidBarcodeException.class,
+            CrossTenantCatalogException.class
     })
     public ResponseEntity<ProblemDetail> handleRbacBadRequest(RuntimeException ex, HttpServletRequest request) {
-        log.warn("RBAC Bad Request: {}", ex.getMessage());
+        log.warn("Bad Request: {}", ex.getMessage());
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         problem.setTitle("Bad Request");
         problem.setType(URI.create("https://savdocrm.com/errors/bad-request"));

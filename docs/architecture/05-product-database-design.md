@@ -1,7 +1,7 @@
 # SAVDOCRM — Milestone 05: Catalog Database Design & Schema Specification
 
-- **Status**: Implemented & Verified in M05.2 (Liquibase changesets `v1.0.0/16-*` through `v1.0.0/21-*`, plus append-only integrity correction `v1.0.0-22-enforce-catalog-tenant-delete-restrict`)
-- **Version**: 1.0.0
+- **Status**: Schema Implemented in M05.2 (`v1.0.0/16-*`–`22-*`); Application-Layer Invariants & Tenant UOM Bootstrap Implemented in M05.3
+- **Version**: 1.1.0
 - **Target Migration**: Milestone 05.2 (`v1.0.0/16-create-product-categories.xml` through `v1.0.0/21-create-product-barcodes.xml`, corrected by `v1.0.0/22-enforce-catalog-tenant-delete-restrict.xml`)
 - **Database Engine**: PostgreSQL 16+
 
@@ -389,7 +389,7 @@ Any attempt to delete a tenant that still owns catalog records is rejected with 
 | :--- | :--- | :--- |
 | Tenant isolation across all Catalog FKs | **Database** | Composite candidate keys `UNIQUE (tenant_id, id)` + composite FKs on `(tenant_id, *_id)` |
 | Bounded hierarchy depth (`0..4`) & no self-parent | **Database** | `chk_product_categories_depth`, `chk_product_categories_no_self_parent` |
-| Multi-hop ancestor cycle detection (`A -> B -> C -> A`) | **Application (M05.3)** | Service-layer ancestor walk prior to category reparenting (cannot be enforced cleanly with a row CHECK constraint) |
-| At most one default variant / primary barcode | **Database** | Partial unique indexes `uq_product_variants_default_per_product`, `uq_product_barcodes_primary_per_variant` |
-| At least one active/default variant & option schema parity | **Application (M05.3)** | Domain service validates variant presence, default promotion, and `Product.variantOptions` vs `ProductVariant.optionValues` keys |
-| Seeding 8 standard UOMs for newly registered tenants | **Application (M05.3)** | `v1.0.0-18` seeds existing tenants idempotently at migration time; M05.3 registration bootstrap must create them for new tenants |
+| Multi-hop ancestor cycle detection (`A -> B -> C -> A`) | **Application (M05.3 — Implemented)** | `ProductCategoryService.moveCategory` acquires a tenant row lock and performs bounded ancestor walk (`<= 5` hops) + bounded subtree BFS before reparenting |
+| At most one default variant / primary barcode | **Database + Application (M05.3 — Implemented)** | Partial unique indexes `uq_product_variants_default_per_product`, `uq_product_barcodes_primary_per_variant` backed by parent `Product`/`ProductVariant` pessimistic locks and ordered `saveAndFlush` transitions |
+| At least one active/default variant & option schema parity | **Application (M05.3 — Implemented)** | `Product`, `ProductVariant`, `ProductService`, and `ProductVariantService` enforce variant presence, active default selection, and `variantOptions` vs `optionValues` parity atomically |
+| Seeding 8 standard UOMs for newly registered tenants | **Application (M05.3 — Implemented)** | `v1.0.0-18` seeds existing tenants idempotently at migration time; `AuthService.register` and `CatalogTenantBootstrapListener` invoke `UnitOfMeasureService.initializeStandardUnitsForCurrentTenant()` atomically inside the registration/creation transaction |

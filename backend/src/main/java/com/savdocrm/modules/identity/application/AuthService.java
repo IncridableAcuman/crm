@@ -1,5 +1,6 @@
 package com.savdocrm.modules.identity.application;
 
+import com.savdocrm.modules.catalog.application.UnitOfMeasureService;
 import com.savdocrm.modules.identity.application.dto.AuthResponse;
 import com.savdocrm.modules.identity.application.dto.LoginRequest;
 import com.savdocrm.modules.identity.application.dto.RefreshTokenRequest;
@@ -48,6 +49,7 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final TenantRepository tenantRepository;
     private final BranchService branchService;
+    private final UnitOfMeasureService unitOfMeasureService;
     private final TenantExecutionTemplate tenantExecutionTemplate;
     private final TenantBootstrapService tenantBootstrapService;
     private final JwtTokenProvider jwtTokenProvider;
@@ -121,6 +123,12 @@ public class AuthService {
 
             // Initialize RBAC system roles and assign initial OWNER to creator membership
             tenantBootstrapService.initializeNewTenantRbac(createdTenantId, createdMembershipId);
+
+            // Seed the 8 standard catalog units of measure atomically for the new tenant
+            tenantExecutionTemplate.executeAsTenant(
+                    createdTenantId,
+                    unitOfMeasureService::initializeStandardUnitsForCurrentTenant
+            );
         }
 
         UUID tokenFamily = UUID.randomUUID();

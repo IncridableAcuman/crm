@@ -4,8 +4,10 @@ import com.savdocrm.modules.tenancy.application.dto.CreateTenantCommand;
 import com.savdocrm.modules.tenancy.application.dto.TenantDto;
 import com.savdocrm.modules.tenancy.domain.Tenant;
 import com.savdocrm.modules.tenancy.domain.TenantStatus;
+import com.savdocrm.modules.tenancy.domain.event.TenantCreatedEvent;
 import com.savdocrm.modules.tenancy.infrastructure.TenantRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,7 @@ import java.util.UUID;
 public class TenantService {
 
     private final TenantRepository tenantRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public TenantDto createTenant(CreateTenantCommand command) {
@@ -33,6 +36,7 @@ public class TenantService {
                 .build();
 
         Tenant saved = tenantRepository.save(tenant);
+        eventPublisher.publishEvent(new TenantCreatedEvent(saved.getId()));
         return TenantDto.fromEntity(saved);
     }
 

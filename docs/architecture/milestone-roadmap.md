@@ -109,7 +109,7 @@ gantt
 ---
 
 ## Milestone 05: Product Catalog & Category Management
-- **Status**: Database Schema & Liquibase Completed (M05.1 & M05.2 Completed)
+- **Status**: Domain Model, Repositories & Core Services Completed (M05.1–M05.3 Completed; M05.4–M05.6 Planned)
 - **Sub-Milestones**:
   - **M05.1 — Architecture & Domain Design** *(Completed — Design-Only)*:
     - **Scope**: Bounded context definition, `Product`/`ProductVariant`/`ProductBarcode`/`Category`/`UnitOfMeasure` domain model, database schema, REST API & RBAC contracts, frontend FSD blueprint, and ADRs (`ADR-0008`–`ADR-0010`).
@@ -121,11 +121,11 @@ gantt
     - **Dependencies**: M05.1.
     - **Tests & Acceptance Criteria**: Testcontainers PostgreSQL 16 integration tests (`CatalogDatabaseMigrationIntegrationTest`, `PostgresLiquibaseMigrationIntegrationTest`) proving composite FKs, cross-tenant rejection, SKU/barcode/sibling uniqueness, partial default-variant & primary-barcode indexes, `CHECK` constraints, `RESTRICT` delete guards, and idempotent UOM seeding.
     - **Exclusions**: Java production code (`TenantBootstrapService` new-tenant UOM hook, entities, services, controllers) and frontend UI.
-  - **M05.3 — Product & Category Domain, Repositories & Public Facade** *(Planned)*:
-    - **Scope**: `Product`, `ProductVariant`, `ProductBarcode`, `Category`, `UnitOfMeasure` JPA entities (`BaseTenantEntity`), `TenantAwareRepository` extensions, `ProductService`, `CategoryService`, `UnitOfMeasureService`, new-tenant standard UOM bootstrap hook, multi-hop category cycle detection, and `ProductQueryFacade`.
+  - **M05.3 — Product & Category Domain, Repositories & Public Facade** *(Completed & Verified)*:
+    - **Scope**: `Product`, `ProductVariant`, `ProductBarcode`, `ProductCategory`, `UnitOfMeasure` JPA entities, `TenantAwareRepository` extensions (`ProductCategoryRepository`, `UnitOfMeasureRepository`, `ProductRepository`, `ProductVariantRepository`) + tenant-scoped `ProductBarcodeRepository`, `ProductService`, `ProductVariantService`, `ProductBarcodeService`, `ProductCategoryService`, `UnitOfMeasureService`, atomic new-tenant standard UOM bootstrap (`AuthService` + `CatalogTenantBootstrapListener`), bounded multi-hop category cycle/depth protection, aggregate-level concurrency locking, and `ProductQueryFacade`.
     - **Dependencies**: M05.2.
-    - **Tests & Acceptance Criteria**: Unit tests for lifecycle transitions, `SIMPLE`/`VARIABLE` invariants, category cycle/depth protection, and PostgreSQL integration tests for multi-tenant isolation.
-    - **Exclusions**: HTTP controllers and frontend UI.
+    - **Tests & Acceptance Criteria**: Domain unit tests, Mockito application service tests, Testcontainers PostgreSQL 16 integration & concurrency tests, UOM bootstrap rollback test, and ArchUnit module boundary checks.
+    - **Exclusions**: HTTP controllers, REST pagination/search endpoints, RBAC endpoint wiring, and frontend UI.
   - **M05.4 — Product & Category REST API & RBAC Integration** *(Planned)*:
     - **Scope**: `ProductController`, `CategoryController`, `UnitController`, DTOs, MapStruct mappers, `PermissionAuthorizationService.hasAnyScopePermission` for branch-scoped catalog reads, and `@PreAuthorize` enforcement on all endpoints.
     - **Dependencies**: M05.3.
