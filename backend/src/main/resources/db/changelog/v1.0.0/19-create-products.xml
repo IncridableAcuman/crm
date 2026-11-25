@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-19-create-products" author="savdocrm-catalog">
+        <comment>Create products table with tenant isolation, composite FKs to category and unit, JSONB options validation, and search indexes</comment>
+        <createTable tableName="products">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_products" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_products_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="category_id" type="UUID"/>
+            <column name="unit_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT"/>
+            <column name="brand" type="VARCHAR(100)"/>
+            <column name="product_type" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_options" type="JSONB" defaultValueComputed="'[]'::jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(20)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="products"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_products_tenant_id"/>
+
+        <addForeignKeyConstraint baseTableName="products"
+                                 baseColumnNames="tenant_id, category_id"
+                                 constraintName="fk_products_category"
+                                 referencedTableName="product_categories"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="products"
+                                 baseColumnNames="tenant_id, unit_id"
+                                 constraintName="fk_products_unit"
+                                 referencedTableName="units_of_measure"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="products" indexName="idx_products_tenant_unit">
+            <column name="tenant_id"/>
+            <column name="unit_id"/>
+        </createIndex>
+
+        <!-- PostgreSQL-specific CHECK constraints, descending sort index, partial indexes, and expression indexes -->
+        <sql dbms="postgresql">
+            ALTER TABLE products
+            ADD CONSTRAINT chk_products_name_not_blank
+            CHECK (BTRIM(name) &lt;&gt; '');
+
+            ALTER TABLE products
+            ADD CONSTRAINT chk_products_type
+            CHECK (product_type IN ('SIMPLE', 'VARIABLE'));
+
+            ALTER TABLE products
+            ADD CONSTRAINT chk_products_status
+            CHECK (status IN ('DRAFT', 'ACTIVE', 'ARCHIVED'));
+
+            ALTER TABLE products
+            ADD CONSTRAINT chk_products_variant_options_array
+            CHECK (
+                jsonb_typeof(variant_options) = 'array'
+                AND jsonb_array_length(variant_options) &lt;= 3
+                AND (
+                    (product_type = 'SIMPLE' AND jsonb_array_length(variant_options) = 0) OR
+                    (product_type = 'VARIABLE' AND jsonb_array_length(variant_options) &gt;= 1)
+                )
+            );
+
+            CREATE INDEX idx_products_tenant_status_created
+            ON products (tenant_id, status, created_at DESC);
+
+            CREATE INDEX idx_products_tenant_category
+            ON products (tenant_id, category_id)
+            WHERE category_id IS NOT NULL;
+
+            CREATE INDEX idx_products_tenant_brand
+            ON products (tenant_id, LOWER(brand))
+            WHERE brand IS NOT NULL;
+
+            CREATE INDEX idx_products_tenant_name_lower
+            ON products (tenant_id, LOWER(name));
+        </sql>
+
+        <rollback>
+            <dropTable tableName="products"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

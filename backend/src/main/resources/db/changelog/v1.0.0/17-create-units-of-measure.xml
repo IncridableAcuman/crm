@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-17-create-units-of-measure" author="savdocrm-catalog">
+        <comment>Create tenant-owned units_of_measure table with precision bounds and composite identity</comment>
+        <createTable tableName="units_of_measure">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_units_of_measure" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_units_of_measure_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="code" type="VARCHAR(20)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(80)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="symbol" type="VARCHAR(15)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="allow_decimal" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="decimal_precision" type="SMALLINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_system" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_active" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="units_of_measure"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_units_of_measure_tenant_id"/>
+
+        <addUniqueConstraint tableName="units_of_measure"
+                             columnNames="tenant_id, code"
+                             constraintName="uq_units_of_measure_tenant_code"/>
+
+        <createIndex tableName="units_of_measure" indexName="idx_units_of_measure_tenant_active">
+            <column name="tenant_id"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <!-- PostgreSQL-specific regex and precision consistency CHECK constraints -->
+        <sql dbms="postgresql">
+            ALTER TABLE units_of_measure
+            ADD CONSTRAINT chk_units_of_measure_code_format
+            CHECK (code ~ '^[A-Z0-9_-]{1,20}$');
+
+            ALTER TABLE units_of_measure
+            ADD CONSTRAINT chk_units_of_measure_name_not_blank
+            CHECK (BTRIM(name) &lt;&gt; '');
+
+            ALTER TABLE units_of_measure
+            ADD CONSTRAINT chk_units_of_measure_symbol_not_blank
+            CHECK (BTRIM(symbol) &lt;&gt; '');
+
+            ALTER TABLE units_of_measure
+            ADD CONSTRAINT chk_units_of_measure_precision
+            CHECK (decimal_precision &gt;= 0 AND decimal_precision &lt;= 3);
+
+            ALTER TABLE units_of_measure
+            ADD CONSTRAINT chk_units_of_measure_decimal_consistency
+            CHECK (allow_decimal = TRUE OR decimal_precision = 0);
+        </sql>
+
+        <rollback>
+            <dropTable tableName="units_of_measure"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

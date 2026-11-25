@@ -108,7 +108,41 @@ gantt
 
 ---
 
-## Milestone 2: Store Branches, Warehouses & Product Catalog
+## Milestone 05: Product Catalog & Category Management
+- **Status**: Database Schema & Liquibase Completed (M05.1 & M05.2 Completed)
+- **Sub-Milestones**:
+  - **M05.1 — Architecture & Domain Design** *(Completed — Design-Only)*:
+    - **Scope**: Bounded context definition, `Product`/`ProductVariant`/`ProductBarcode`/`Category`/`UnitOfMeasure` domain model, database schema, REST API & RBAC contracts, frontend FSD blueprint, and ADRs (`ADR-0008`–`ADR-0010`).
+    - **Dependencies**: M02 Multi-Tenancy, M04 RBAC & 33-permission catalog.
+    - **Deliverables**: `05-product-catalog.md`, `05-product-database-design.md`, `05-product-api-contracts.md`, `05-product-frontend-architecture.md`, `ADR-0008`–`ADR-0010`, updated `domain-modules.md` & `milestone-roadmap.md`.
+    - **Exclusions**: Zero Java, TypeScript, Liquibase, or seed implementation.
+  - **M05.2 — Database Schema & Liquibase** *(Completed — Schema & Migration Tests Only)*:
+    - **Scope**: Append-only Liquibase migrations (`v1.0.0/16`–`v1.0.0/21`) for `product_categories`, `units_of_measure`, idempotent default 8-unit tenant seeding, `products`, `product_variants`, and `product_barcodes` (`ON DELETE RESTRICT` across all business FKs).
+    - **Dependencies**: M05.1.
+    - **Tests & Acceptance Criteria**: Testcontainers PostgreSQL 16 integration tests (`CatalogDatabaseMigrationIntegrationTest`, `PostgresLiquibaseMigrationIntegrationTest`) proving composite FKs, cross-tenant rejection, SKU/barcode/sibling uniqueness, partial default-variant & primary-barcode indexes, `CHECK` constraints, `RESTRICT` delete guards, and idempotent UOM seeding.
+    - **Exclusions**: Java production code (`TenantBootstrapService` new-tenant UOM hook, entities, services, controllers) and frontend UI.
+  - **M05.3 — Product & Category Domain, Repositories & Public Facade** *(Planned)*:
+    - **Scope**: `Product`, `ProductVariant`, `ProductBarcode`, `Category`, `UnitOfMeasure` JPA entities (`BaseTenantEntity`), `TenantAwareRepository` extensions, `ProductService`, `CategoryService`, `UnitOfMeasureService`, new-tenant standard UOM bootstrap hook, multi-hop category cycle detection, and `ProductQueryFacade`.
+    - **Dependencies**: M05.2.
+    - **Tests & Acceptance Criteria**: Unit tests for lifecycle transitions, `SIMPLE`/`VARIABLE` invariants, category cycle/depth protection, and PostgreSQL integration tests for multi-tenant isolation.
+    - **Exclusions**: HTTP controllers and frontend UI.
+  - **M05.4 — Product & Category REST API & RBAC Integration** *(Planned)*:
+    - **Scope**: `ProductController`, `CategoryController`, `UnitController`, DTOs, MapStruct mappers, `PermissionAuthorizationService.hasAnyScopePermission` for branch-scoped catalog reads, and `@PreAuthorize` enforcement on all endpoints.
+    - **Dependencies**: M05.3.
+    - **Tests & Acceptance Criteria**: MockMvc integration tests covering pagination/search/lookup, `400`/`403`/`404`/`409` RFC7807 errors, branch-scoped reader vs tenant-scoped writer RBAC enforcement, and ArchUnit checks.
+    - **Exclusions**: Frontend UI, Inventory stock, Sales/Purchases.
+  - **M05.5 — Product & Category Frontend (FSD)** *(Planned)*:
+    - **Scope**: `entities/{product,category,unit}`, `features/catalog/*`, `widgets/{product-table,category-tree}`, `pages/catalog/*`, `PermissionRoute` + `PermissionGuard` integration, and Vitest + production build verification.
+    - **Dependencies**: M05.4.
+    - **Exclusions**: POS checkout, stock balances, image uploads.
+  - **M05.6 — Integration, Security & Quality Audit** *(Planned)*:
+    - **Scope**: End-to-end backend/frontend contract audit, multi-tenant cache isolation verification, ArchUnit & full regression test pass.
+    - **Dependencies**: M05.5.
+    - **Exclusions**: M06 Inventory implementation.
+
+---
+
+## Milestone 2 (Legacy Reference): Store Branches, Warehouses & Product Catalog
 - **Backend Objectives**:
   - Tenancy module: Branch and Warehouse management endpoints with composite FK constraints.
   - Catalog module: Categories (hierarchical tree), Brands, Units of Measure (`pcs`, `kg`, `meter`, etc. with decimal configuration).

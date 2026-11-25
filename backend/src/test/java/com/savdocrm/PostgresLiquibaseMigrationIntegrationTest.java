@@ -75,15 +75,15 @@ class PostgresLiquibaseMigrationIntegrationTest {
         );
         assertThat(indexCount).isNotNull().isEqualTo(1);
 
-        // Verify M04.2 changesets 09-15 were executed
-        for (int i = 9; i <= 15; i++) {
+        // Verify M04.2 changesets 09-15 and M05.2 changesets 16-21 were executed
+        for (int i = 9; i <= 21; i++) {
             String prefix = String.format("v1.0.0-%02d-", i);
-            Integer rbacChangesetCount = jdbcTemplate.queryForObject(
+            Integer migrationChangesetCount = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM databasechangelog WHERE id LIKE ?",
                     Integer.class,
                     prefix + "%"
             );
-            assertThat(rbacChangesetCount)
+            assertThat(migrationChangesetCount)
                     .as("Changeset %s must be executed", prefix)
                     .isNotNull()
                     .isEqualTo(1);

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-20-create-product-variants" author="savdocrm-catalog">
+        <comment>Create product_variants table with tenant isolation, composite product FK (RESTRICT), SKU format check, and partial unique default variant index</comment>
+        <createTable tableName="product_variants">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_product_variants" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_product_variants_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="product_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sku" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(220)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="option_values" type="JSONB" defaultValueComputed="'{}'::jsonb">
+                <constraints nullable="false"/>
+            </column>
+            <column name="cost_price" type="NUMERIC(15,4)" defaultValueNumeric="0.0000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="selling_price" type="NUMERIC(15,4)" defaultValueNumeric="0.0000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_default" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_active" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="product_variants"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_product_variants_tenant_id"/>
+
+        <addUniqueConstraint tableName="product_variants"
+                             columnNames="tenant_id, sku"
+                             constraintName="uq_product_variants_tenant_sku"/>
+
+        <addUniqueConstraint tableName="product_variants"
+                             columnNames="tenant_id, product_id, option_values"
+                             constraintName="uq_product_variants_product_options"/>
+
+        <addForeignKeyConstraint baseTableName="product_variants"
+                                 baseColumnNames="tenant_id, product_id"
+                                 constraintName="fk_product_variants_product"
+                                 referencedTableName="products"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="product_variants" indexName="idx_product_variants_tenant_product_active">
+            <column name="tenant_id"/>
+            <column name="product_id"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <!-- PostgreSQL-specific SKU regex check, monetary check, JSONB object check, and single-default-per-product partial unique index -->
+        <sql dbms="postgresql">
+            ALTER TABLE product_variants
+            ADD CONSTRAINT chk_product_variants_sku_format
+            CHECK (sku ~ '^[A-Z0-9._-]{2,100}$');
+
+            ALTER TABLE product_variants
+            ADD CONSTRAINT chk_product_variants_name_not_blank
+            CHECK (BTRIM(name) &lt;&gt; '');
+
+            ALTER TABLE product_variants
+            ADD CONSTRAINT chk_product_variants_prices
+            CHECK (cost_price &gt;= 0 AND selling_price &gt;= 0);
+
+            ALTER TABLE product_variants
+            ADD CONSTRAINT chk_product_variants_option_values_obj
+            CHECK (jsonb_typeof(option_values) = 'object');
+
+            CREATE UNIQUE INDEX uq_product_variants_default_per_product
+            ON product_variants (tenant_id, product_id)
+            WHERE is_default = TRUE;
+        </sql>
+
+        <rollback>
+            <dropTable tableName="product_variants"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

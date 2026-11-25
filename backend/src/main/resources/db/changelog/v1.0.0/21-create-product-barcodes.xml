@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-21-create-product-barcodes" author="savdocrm-catalog">
+        <comment>Create product_barcodes table with tenant uniqueness, composite variant FK (RESTRICT), type validation, and primary barcode partial unique index</comment>
+        <createTable tableName="product_barcodes">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_product_barcodes" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_product_barcodes_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="barcode" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="barcode_type" type="VARCHAR(30)" defaultValue="EAN13">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_primary" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+        </createTable>
+
+        <addUniqueConstraint tableName="product_barcodes"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_product_barcodes_tenant_id"/>
+
+        <addUniqueConstraint tableName="product_barcodes"
+                             columnNames="tenant_id, barcode"
+                             constraintName="uq_product_barcodes_tenant_barcode"/>
+
+        <addForeignKeyConstraint baseTableName="product_barcodes"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_product_barcodes_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="product_barcodes" indexName="idx_product_barcodes_tenant_variant">
+            <column name="tenant_id"/>
+            <column name="variant_id"/>
+        </createIndex>
+
+        <!-- PostgreSQL-specific trimmed non-blank barcode check, barcode_type enum check, and primary barcode partial unique index -->
+        <sql dbms="postgresql">
+            ALTER TABLE product_barcodes
+            ADD CONSTRAINT chk_product_barcodes_not_blank
+            CHECK (BTRIM(barcode) &lt;&gt; '' AND barcode = BTRIM(barcode));
+
+            ALTER TABLE product_barcodes
+            ADD CONSTRAINT chk_product_barcodes_type
+            CHECK (barcode_type IN ('EAN13', 'EAN8', 'UPC_A', 'CODE128', 'INTERNAL', 'OTHER'));
+
+            CREATE UNIQUE INDEX uq_product_barcodes_primary_per_variant
+            ON product_barcodes (tenant_id, variant_id)
+            WHERE is_primary = TRUE;
+        </sql>
+
+        <rollback>
+            <dropTable tableName="product_barcodes"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

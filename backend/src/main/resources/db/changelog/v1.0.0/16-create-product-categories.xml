@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-16-create-product-categories" author="savdocrm-catalog">
+        <comment>Create product_categories table with tenant isolation, composite self-referencing FK, bounded depth check, and sibling uniqueness</comment>
+        <createTable tableName="product_categories">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_product_categories" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_product_categories_tenant"
+                             references="tenants(id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="parent_id" type="UUID"/>
+            <column name="code" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="TEXT"/>
+            <column name="depth" type="INTEGER" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="sort_order" type="INTEGER" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_active" type="BOOLEAN" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="product_categories"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_product_categories_tenant_id"/>
+
+        <addUniqueConstraint tableName="product_categories"
+                             columnNames="tenant_id, code"
+                             constraintName="uq_product_categories_tenant_code"/>
+
+        <addForeignKeyConstraint baseTableName="product_categories"
+                                 baseColumnNames="tenant_id, parent_id"
+                                 constraintName="fk_product_categories_parent"
+                                 referencedTableName="product_categories"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="product_categories" indexName="idx_product_categories_tenant_parent">
+            <column name="tenant_id"/>
+            <column name="parent_id"/>
+            <column name="sort_order"/>
+            <column name="name"/>
+        </createIndex>
+
+        <createIndex tableName="product_categories" indexName="idx_product_categories_tenant_active">
+            <column name="tenant_id"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <!-- PostgreSQL-specific CHECK constraints and case-insensitive partial unique sibling indexes -->
+        <sql dbms="postgresql">
+            ALTER TABLE product_categories
+            ADD CONSTRAINT chk_product_categories_code_format
+            CHECK (code ~ '^[A-Z0-9_-]{2,50}$');
+
+            ALTER TABLE product_categories
+            ADD CONSTRAINT chk_product_categories_name_not_blank
+            CHECK (BTRIM(name) &lt;&gt; '');
+
+            ALTER TABLE product_categories
+            ADD CONSTRAINT chk_product_categories_no_self_parent
+            CHECK (parent_id IS NULL OR parent_id &lt;&gt; id);
+
+            ALTER TABLE product_categories
+            ADD CONSTRAINT chk_product_categories_depth
+            CHECK (depth &gt;= 0 AND depth &lt;= 4);
+
+            CREATE UNIQUE INDEX uq_product_categories_root_name
+            ON product_categories (tenant_id, LOWER(name))
+            WHERE parent_id IS NULL;
+
+            CREATE UNIQUE INDEX uq_product_categories_child_name
+            ON product_categories (tenant_id, parent_id, LOWER(name))
+            WHERE parent_id IS NOT NULL;
+        </sql>
+
+        <rollback>
+            <dropTable tableName="product_categories"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

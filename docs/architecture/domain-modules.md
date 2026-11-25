@@ -136,16 +136,16 @@ graph TD
 ---
 
 ### 3.3. Catalog Module (`com.savdocrm.modules.catalog`)
-* **Core Purpose**: Manages product hierarchies, matrix variants, multiple barcodes, brands, dynamic attributes, units of measure, and pricing rules.
-* **Entities**:
-  - `Category`: Self-referential hierarchical category tree.
-  - `Brand`: Manufacturer/brand metadata.
-  - `UnitOfMeasure`: Base and derived units (`pcs`, `kg`, `g`, `meter`, `box`).
-  - `Product`: Master conceptual product container (title, description, category, brand, tax rate).
-  - `ProductVariant`: The transactable SKU with dynamic JSONB attributes (Size, Color), cost price, and selling price.
-  - `Barcode`: Multiple barcodes per variant (EAN-13, UPC, Code 128, custom).
+* **Core Purpose**: Owns product identity, SKU/barcode identification, hierarchical categories, measurement unit definitions, and variant option structures across retail verticals. Explicitly does **not** own stock quantities, inventory valuation (WAC), tax regimes, sales orders, or financial transactions.
+* **Entities & Tables**:
+  - `Category` (`product_categories`): Self-referential Adjacency List (`parent_id`, bounded depth `0..4`, `ON DELETE RESTRICT`).
+  - `UnitOfMeasure` (`units_of_measure`): Tenant-owned system-seeded (`PCS`, `KG`, `G`, `L`, `ML`, `M`, `BOX`, `PACK`) and custom units with `allow_decimal` and `decimal_precision` (`0..3`).
+  - `Product` (`products`): Conceptual product parent (`name`, `description`, optional `brand` string, `category_id`, `unit_id`, `product_type` [`SIMPLE` | `VARIABLE`], `variant_options` JSONB, `status` [`DRAFT` | `ACTIVE` | `ARCHIVED`]).
+  - `ProductVariant` (`product_variants`): Transactable SKU (`sku`, `name`, `option_values` JSONB, reference `cost_price`, base `selling_price`, `is_default`, `is_active`). All downstream modules (`Inventory`, `Sales`, `Purchases`) reference `variant_id`.
+  - `ProductBarcode` (`product_barcodes`): Explicit multi-barcode registry (`0..N` per variant, `EAN13`, `EAN8`, `UPC_A`, `CODE128`, `INTERNAL`, `OTHER`) with tenant-scoped uniqueness.
 * **Public Contracts**:
-  - `ProductQueryFacade`: Provides read-only DTO projections (`VariantDetailsDto`) to Sales and Inventory modules.
+  - `ProductQueryFacade`: Provides immutable DTO projections (`VariantCatalogDto`, `VariantLookupDto`) to `Inventory`, `Sales`, and `Purchases` without exposing JPA entities or repositories.
+* **Architecture Docs**: [05-product-catalog.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-catalog.md), [05-product-database-design.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-database-design.md), [05-product-api-contracts.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-api-contracts.md)
 
 ---
 

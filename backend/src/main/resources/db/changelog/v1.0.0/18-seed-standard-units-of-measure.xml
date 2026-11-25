@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-18-seed-standard-units-of-measure" author="savdocrm-catalog" dbms="postgresql">
+        <comment>Seed the 8 standard system-defined units of measure for all existing tenants idempotently</comment>
+        <!-- SQL required for cross-joining existing tenants with standard UOM tuples and idempotent NOT EXISTS guards -->
+        <sql>
+            INSERT INTO units_of_measure (
+                id, tenant_id, code, name, symbol, allow_decimal, decimal_precision,
+                is_system, is_active, created_at, updated_at, version
+            )
+            SELECT
+                gen_random_uuid(),
+                t.id,
+                v.code,
+                v.name,
+                v.symbol,
+                v.allow_decimal,
+                v.decimal_precision,
+                true,
+                true,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP,
+                0
+            FROM tenants t
+            CROSS JOIN (
+                VALUES
+                    ('PCS',  'Piece',      'pcs',  false, 0),
+                    ('KG',   'Kilogram',   'kg',   true,  3),
+                    ('G',    'Gram',       'g',    false, 0),
+                    ('L',    'Liter',      'l',    true,  3),
+                    ('ML',   'Milliliter', 'ml',   false, 0),
+                    ('M',    'Meter',      'm',    true,  2),
+                    ('BOX',  'Box',        'box',  false, 0),
+                    ('PACK', 'Package',    'pack', false, 0)
+            ) AS v(code, name, symbol, allow_decimal, decimal_precision)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM units_of_measure u
+                WHERE u.tenant_id = t.id
+                  AND u.code = v.code
+            );
+        </sql>
+
+        <rollback>
+            <delete tableName="units_of_measure">
+                <where>is_system = true</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

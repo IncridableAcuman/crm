@@ -21,5 +21,11 @@
     <include file="db/changelog/v1.0.0/13-seed-permissions-catalog.xml"/>
     <include file="db/changelog/v1.0.0/14-seed-system-roles.xml"/>
     <include file="db/changelog/v1.0.0/15-harden-rbac-foreign-keys.xml"/>
+    <include file="db/changelog/v1.0.0/16-create-product-categories.xml"/>
+    <include file="db/changelog/v1.0.0/17-create-units-of-measure.xml"/>
+    <include file="db/changelog/v1.0.0/18-seed-standard-units-of-measure.xml"/>
+    <include file="db/changelog/v1.0.0/19-create-products.xml"/>
+    <include file="db/changelog/v1.0.0/20-create-product-variants.xml"/>
+    <include file="db/changelog/v1.0.0/21-create-product-barcodes.xml"/>
 
 </databaseChangeLog>
