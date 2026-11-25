@@ -1,7 +1,7 @@
 # SAVDOCRM — Milestone 04: Role-Based Access Control (RBAC) & Scoped Permission Management Architecture
 
-- **Status**: Core Domain, Authorization Engine, Role Management API & Method Security Implemented & Verified (M04.4)
-- **Version**: 1.4.0
+- **Status**: Completed & Audited (Backend M04.1–M04.4 + Frontend M04.5 Hardening)
+- **Version**: 1.5.0
 - **Context**: Milestone 04 — Identity & Access Management (IAM)
 - **Related ADRs**: [ADR-0005](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0005-stateless-jwt-dual-phase-authentication.md), [ADR-0006](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0006-strict-single-use-refresh-token-rotation.md), [ADR-0007](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md)
 
@@ -589,33 +589,57 @@ Tenants created during Milestones 01–03 do not have role assignments.
 Base Path: `/api/v1`
 
 ### 10.1 Permissions Master Catalog
-- `GET /api/v1/permissions`: List all available system permissions (grouped by module). Required permission: `identity.roles.read`.
-- `GET /api/v1/permissions/{id}`: Get permission details. Required permission: `identity.roles.read`.
+- `GET /api/v1/permissions`: List all 33 canonical system permissions (`id`, `code`, `module`, `resource`, `action`, `description`). Required permission: `identity.roles.read`.
 
 ### 10.2 Role Management
-- `GET /api/v1/roles`: List all roles for active tenant (paginated). Required permission: `identity.roles.read`.
-- `GET /api/v1/roles/{id}`: Get role details and associated permission IDs. Required permission: `identity.roles.read`.
-- `POST /api/v1/roles`: Create a custom tenant role. Required permission: `identity.roles.manage`. Enforces Containment Rule.
-- `PUT /api/v1/roles/{id}`: Update custom role name and description. System roles reject updates. Required permission: `identity.roles.manage`.
-- `DELETE /api/v1/roles/{id}`: Delete custom role. System roles reject deletion. Fails if active assignments exist. Required permission: `identity.roles.manage`.
-- `PUT /api/v1/roles/{id}/permissions`: Update permissions associated with a custom role. Fails on system roles. Enforces Containment Rule. Required permission: `identity.roles.manage`.
+- `GET /api/v1/roles`: List all roles (system + custom) for active tenant. Required permission: `identity.roles.read`.
+- `GET /api/v1/roles/{roleId}`: Get role details and assigned permission codes. Required permission: `identity.roles.read`.
+- `POST /api/v1/roles`: Create a custom tenant role. Required permission: `identity.roles.manage`. Enforces Grant-What-You-Hold.
+- `PUT /api/v1/roles/{roleId}`: Update custom role name and description. System roles reject updates (`403`). Required permission: `identity.roles.manage`.
+- `DELETE /api/v1/roles/{roleId}`: Delete unassigned custom role or soft-deactivate assigned custom role (`isActive = false`). System roles reject deletion (`403`). Required permission: `identity.roles.manage`.
+- `GET /api/v1/roles/{roleId}/permissions`: Retrieve permission codes for a role (`RolePermissionResponse`: `roleId`, `roleCode`, `permissions`). Required permission: `identity.roles.read`.
+- `PUT /api/v1/roles/{roleId}/permissions`: Update permissions associated with a custom role (`RolePermissionResponse`). Fails on system roles (`403`). Enforces Grant-What-You-Hold. Required permission: `identity.roles.manage`.
 
 ### 10.3 User Role Assignment Management
-- `GET /api/v1/members/{membershipId}/roles`: List all active and historical role assignments for a member. Required permission: `identity.users.read`.
-- `POST /api/v1/members/{membershipId}/roles`: Assign a role to a member with designated scope (`TENANT` or `BRANCH`). Required permission: `identity.users.manage`. Enforces Containment Rule and Owner Protection Guard.
-- `DELETE /api/v1/members/{membershipId}/roles/{assignmentId}`: Revoke a role assignment. Required permission: `identity.users.manage`. Protected by Tenant Row-Level Lock and Last Active Owner check.
+- `GET /api/v1/role-assignments` (optional `?membershipId=`): List active role assignments for the active tenant (or all assignments for the specified membership). Required permission: `identity.roles.read`.
+- `POST /api/v1/role-assignments`: Assign a role to a membership with designated scope (`TENANT` or `BRANCH`). Required permission: `identity.roles.manage`. Enforces Grant-What-You-Hold, Owner Protection Guard, and Self-Elevation Guard.
+- `DELETE /api/v1/role-assignments/{assignmentId}`: Soft-revoke a role assignment. Required permission: `identity.roles.manage`. Protected by Tenant Row-Level Lock and Last Active Owner check.
+- `GET /api/v1/members/{membershipId}/roles`: List all active and historical role assignments for a member. Required permission: `identity.users.read` or `identity.roles.read`.
+- `POST /api/v1/members/{membershipId}/roles`: Assign a role to a specific member (`TENANT` or `BRANCH` scope). Required permission: `identity.roles.manage`.
+- `DELETE /api/v1/members/{membershipId}/roles/{assignmentId}`: Revoke a role assignment for a specific member. Required permission: `identity.roles.manage`. Protected by Tenant Row-Level Lock and Last Active Owner check.
 
 ### 10.4 Current User Permissions
-- `GET /api/v1/me/permissions`: Retrieve effective permissions and scopes for the currently authenticated user in the active store. Returns list of granted permission codes and branch scopes. Used by the frontend for dynamic UI gating.
+- `GET /api/v1/me/permissions`: Retrieve effective permissions and scopes (`tenantPermissions`, `branchPermissions`) for the currently authenticated user in the active store. Used by the frontend for dynamic UI gating.
+
+### 10.5 Branch Management
+- `GET /api/v1/branches`: List active branches for current active tenant (`BranchDto`: `id`, `tenantId`, `name`, `code`, `address`, `phone`, `isActive`, `isMain`, `createdAt`, `updatedAt`).
+- `GET /api/v1/branches/{id}`: Retrieve branch by ID within active tenant.
+- `POST /api/v1/branches`: Create a new branch (`CreateBranchCommand`: `name`, `code`, `address`, `phone`, `isMain`). Required permission: `tenancy.branches.manage`.
 
 ---
 
-## 11. Verification & Milestone 04 Delivery Roadmap
+## 11. Frontend RBAC Integration & Hardening (M04.5)
+
+- **Permission Catalog Consumption**: Frontend consumes `GET /api/v1/permissions` dynamically (all 33 canonical permissions, zero duplicated catalog) and maps codes to readable UI labels via `getPermissionLabel` / `getModuleLabel`, with safe title-cased fallback for future codes.
+- **Seven System Roles**: All 7 built-in system roles (`OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, `WAREHOUSE_MANAGER`, `ACCOUNTANT`, `VIEWER`) are rendered with `SYSTEM` distinction, read-only permissions modal, and disabled edit/delete controls. Custom roles support create, edit details (`PUT /api/v1/roles/{roleId}`), permission configuration (`PUT /api/v1/roles/{roleId}/permissions`), and delete/soft-deactivate (`DELETE /api/v1/roles/{roleId}`).
+- **Fail-Closed Authorization Guards**:
+  - `PermissionGuard` hides/blocks protected UI elements while permissions are loading, on API failure, or when unauthorized.
+  - `PermissionRoute` enforces route-level authorization on `/branches` (`tenancy.branches.read`, tenant or branch scope), `/roles` (`identity.roles.read`), and `/assignments` (`identity.roles.read`), blocking premature page mounts, showing retry UI on `/me/permissions` errors, and enforcing access denial even on direct URL navigation.
+  - TanStack Query disables automatic retries on 4xx responses (`401`/`403`/`404`/`409`).
+- **Tenant Switching & Cache Isolation**: Query keys for branches, roles, role details, role permissions, assignments, user effective permissions, and permission catalog are scoped by `tenantId`. Switching tenants and logging out cancel in-flight queries and clear the query cache atomically (`queryClient.cancelQueries()` + `queryClient.clear()`). Access tokens remain strictly in memory and refresh tokens remain in `HttpOnly` cookies.
+- **Branch-Scope Behavior**: Role assignment form validates `TENANT` vs `BRANCH` scope, resets stale `branchId` when switching back to `TENANT`, locks `OWNER` assignments to `TENANT` scope, and uses active tenant branches only.
+- **Assignment Workflow & Known Limitations**: Role assignment supports assigning, filtering by `membershipId`, and revoking with Last Active OWNER informational warning and RFC7807 error handling. **Known Limitation**: `UserRoleAssignmentDto` returns `membershipId` only and no tenant member listing/search API exists in M04, so assignments reference `membershipId` UUID directly.
+- **Verified Test Counts (M04.5 Audit)**:
+  - Backend: **171 tests** (171 passed, 0 failed, 0 skipped) via `./gradlew clean build` (PostgreSQL 16 Testcontainers + ArchUnit).
+  - Frontend: **56 tests** across 13 Vitest test files (56 passed, 0 failed) + strict TypeScript & Vite production build passing.
+
+---
+
+## 12. Verification & Milestone 04 Delivery Roadmap
 
 The implementation is executed strictly in sequence:
 - **M04.1 — RBAC Domain Design & Architecture Review** *(Completed & Approved)*
 - **M04.2 — Database Schema & Liquibase Migrations** *(Completed & Verified)*
 - **M04.3 — Core Permission Engine & Backend Authorization** *(Completed & Verified)*
 - **M04.4 — Role Management API & Method-Level Security** *(Completed & Verified)*
-- **M04.5 — Frontend Role Management & UI Permission Gating** *(Next Step)*
-- **M04.6 — Final Production Verification & Penetration Testing**
+- **M04.5 — Frontend Role Management & UI Permission Gating** *(Completed & Audited)*

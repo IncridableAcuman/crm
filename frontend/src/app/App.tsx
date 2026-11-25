@@ -10,6 +10,7 @@ import { BranchesPage } from '@/pages/branches/BranchesPage';
 import { RolesPage } from '@/pages/roles/RolesPage';
 import { RoleAssignmentsPage } from '@/pages/assignments/RoleAssignmentsPage';
 import { ProtectedRoute } from '@/app/routes/ProtectedRoute';
+import { PermissionRoute } from '@/app/routes/PermissionRoute';
 import { AppLayout } from '@/widgets/layout/AppLayout';
 
 export const App: React.FC = () => {
@@ -32,9 +33,13 @@ export const App: React.FC = () => {
               <Route element={<AppLayout />}>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/dashboard" element={<HomePage />} />
-                <Route path="/branches" element={<BranchesPage />} />
-                <Route path="/roles" element={<RolesPage />} />
-                <Route path="/assignments" element={<RoleAssignmentsPage />} />
+                <Route element={<PermissionRoute permission="tenancy.branches.read" allowBranchScope={true} />}>
+                  <Route path="/branches" element={<BranchesPage />} />
+                </Route>
+                <Route element={<PermissionRoute permission="identity.roles.read" />}>
+                  <Route path="/roles" element={<RolesPage />} />
+                  <Route path="/assignments" element={<RoleAssignmentsPage />} />
+                </Route>
               </Route>
             </Route>
 

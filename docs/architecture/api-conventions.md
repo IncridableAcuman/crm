@@ -173,17 +173,22 @@ Endpoints declare fine-grained permissions via Spring Security `@PreAuthorize`:
 ### 7.3. RBAC Endpoints Matrix
 | Method | Path | Required Permission | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/permissions` | `identity.roles.read` | Lists all 33 canonical permissions in master catalog. |
-| `GET` | `/api/v1/roles` | `identity.roles.read` | Lists all roles (system + custom) for active tenant. |
+| `GET` | `/api/v1/branches` | Authenticated Tenant | Lists active branches for active tenant (`BranchDto` includes `isMain`, no `timezone`). |
+| `GET` | `/api/v1/branches/{id}` | Authenticated Tenant | Retrieves branch details by ID within active tenant. |
+| `POST` | `/api/v1/branches` | `tenancy.branches.manage` | Creates a new branch in active tenant (`CreateBranchCommand`). |
+| `GET` | `/api/v1/permissions` | `identity.roles.read` | Lists all 33 canonical permissions in master catalog (`PermissionDto`). |
+| `GET` | `/api/v1/roles` | `identity.roles.read` | Lists all roles (7 system + custom) for active tenant. |
 | `GET` | `/api/v1/roles/{id}` | `identity.roles.read` | Retrieves role details and assigned permission codes. |
 | `POST` | `/api/v1/roles` | `identity.roles.manage` | Creates custom role (enforces Grant-What-You-Hold). |
 | `PUT` | `/api/v1/roles/{id}` | `identity.roles.manage` | Updates custom role (system roles immutable, 403). |
 | `DELETE` | `/api/v1/roles/{id}` | `identity.roles.manage` | Deletes unassigned role / soft-deactivates assigned role. |
-| `GET` | `/api/v1/roles/{id}/permissions` | `identity.roles.read` | Retrieves permission codes for role. |
-| `PUT` | `/api/v1/roles/{id}/permissions` | `identity.roles.manage` | Updates role permissions (enforces Grant-What-You-Hold). |
-| `GET` | `/api/v1/role-assignments` | `identity.roles.read` | Lists active role assignments for tenant. |
-| `GET` | `/api/v1/members/{mId}/roles` | `identity.users.read` | Lists role assignments for specific membership. |
+| `GET` | `/api/v1/roles/{id}/permissions` | `identity.roles.read` | Retrieves `RolePermissionResponse` (`roleId`, `roleCode`, `permissions`). |
+| `PUT` | `/api/v1/roles/{id}/permissions` | `identity.roles.manage` | Updates role permissions, returning `RolePermissionResponse` (enforces Grant-What-You-Hold). |
+| `GET` | `/api/v1/role-assignments` | `identity.roles.read` | Lists active role assignments for tenant (optional `?membershipId=`). |
+| `GET` | `/api/v1/members/{mId}/roles` | `identity.users.read` or `identity.roles.read` | Lists role assignments for specific membership. |
 | `POST` | `/api/v1/role-assignments` | `identity.roles.manage` | Assigns role (TENANT or BRANCH scope). |
+| `POST` | `/api/v1/members/{mId}/roles` | `identity.roles.manage` | Assigns role to specific member (TENANT or BRANCH scope). |
 | `DELETE` | `/api/v1/role-assignments/{id}` | `identity.roles.manage` | Revokes role assignment (protects Last Active OWNER). |
-| `GET` | `/api/v1/me/permissions` | Authenticated Tenant | Returns effective permissions and branch scopes for caller. |
+| `DELETE` | `/api/v1/members/{mId}/roles/{aId}` | `identity.roles.manage` | Revokes role assignment for specific member (protects Last Active OWNER). |
+| `GET` | `/api/v1/me/permissions` | Authenticated Tenant | Returns effective permissions (`tenantPermissions`, `branchPermissions`) for caller. |
 

@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { queryClient } from '../../../shared/api/queryClient';
 import { useAuthStore } from './useAuthStore';
+import { branchKeys } from '../../../entities/branch/model/branchQueries';
+import { roleKeys } from '../../../entities/role/model/roleQueries';
+import { permissionKeys } from '../../../entities/permission/model/permissionQueries';
 
 describe('Tenant Switching & Query Cache Isolation', () => {
   beforeEach(() => {
@@ -72,5 +75,24 @@ describe('Tenant Switching & Query Cache Isolation', () => {
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().isTenantSelected).toBe(false);
     expect(queryClient.getQueryData(['user-profile'])).toBeUndefined();
+  });
+
+  it('should scope RBAC and branch query keys by tenantId so old tenant data is never reused', () => {
+    expect(branchKeys.list('t1')).not.toEqual(branchKeys.list('t2'));
+    expect(branchKeys.detail('t1', 'b1')).not.toEqual(branchKeys.detail('t2', 'b1'));
+    expect(roleKeys.list('t1')).not.toEqual(roleKeys.list('t2'));
+    expect(roleKeys.detail('t1', 'r1')).not.toEqual(roleKeys.detail('t2', 'r1'));
+    expect(roleKeys.permissions('t1', 'r1')).not.toEqual(roleKeys.permissions('t2', 'r1'));
+    expect(roleKeys.assignments('t1')).not.toEqual(roleKeys.assignments('t2'));
+    expect(permissionKeys.mine('t1')).not.toEqual(permissionKeys.mine('t2'));
+    expect(permissionKeys.catalog('t1')).not.toEqual(permissionKeys.catalog('t2'));
+
+    queryClient.setQueryData(permissionKeys.mine('t1'), { tenantPermissions: ['identity.roles.manage'] });
+    queryClient.setQueryData(roleKeys.list('t1'), [{ id: 'r1', code: 'CUSTOM_A' }]);
+
+    queryClient.clear();
+
+    expect(queryClient.getQueryData(permissionKeys.mine('t1'))).toBeUndefined();
+    expect(queryClient.getQueryData(roleKeys.list('t1'))).toBeUndefined();
   });
 });

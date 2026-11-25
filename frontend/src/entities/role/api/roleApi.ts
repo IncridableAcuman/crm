@@ -4,6 +4,7 @@ import {
   Role,
   CreateRoleRequest,
   UpdateRoleRequest,
+  RolePermissionResponse,
   RolePermissionUpdateRequest,
   UserRoleAssignment,
   CreateRoleAssignmentRequest,
@@ -35,15 +36,18 @@ export const roleApi = {
   },
 
   getRolePermissions: async (roleId: string): Promise<string[]> => {
-    const response = await apiClient.get<ApiResponse<string[]>>(`/roles/${roleId}/permissions`);
-    return response.data.data;
+    const response = await apiClient.get<ApiResponse<RolePermissionResponse>>(
+      `/roles/${roleId}/permissions`
+    );
+    return response.data.data.permissions;
   },
 
   updateRolePermissions: async (roleId: string, permissions: string[]): Promise<string[]> => {
-    const response = await apiClient.put<ApiResponse<string[]>>(`/roles/${roleId}/permissions`, {
-      permissions,
-    } as RolePermissionUpdateRequest);
-    return response.data.data;
+    const response = await apiClient.put<ApiResponse<RolePermissionResponse>>(
+      `/roles/${roleId}/permissions`,
+      { permissions } as RolePermissionUpdateRequest
+    );
+    return response.data.data.permissions;
   },
 
   // Role Assignments
@@ -62,5 +66,34 @@ export const roleApi = {
 
   revokeRoleAssignment: async (assignmentId: string): Promise<void> => {
     await apiClient.delete<ApiResponse<void>>(`/role-assignments/${assignmentId}`);
+  },
+
+  // Member-Scoped Role Assignment Endpoints
+  getMemberRoles: async (membershipId: string): Promise<UserRoleAssignment[]> => {
+    const response = await apiClient.get<ApiResponse<UserRoleAssignment[]>>(
+      `/members/${membershipId}/roles`
+    );
+    return response.data.data;
+  },
+
+  assignRoleToMember: async (
+    membershipId: string,
+    data: Omit<CreateRoleAssignmentRequest, 'membershipId'>
+  ): Promise<UserRoleAssignment> => {
+    const payload: CreateRoleAssignmentRequest = {
+      ...data,
+      membershipId,
+    };
+    const response = await apiClient.post<ApiResponse<UserRoleAssignment>>(
+      `/members/${membershipId}/roles`,
+      payload
+    );
+    return response.data.data;
+  },
+
+  revokeMemberRole: async (membershipId: string, assignmentId: string): Promise<void> => {
+    await apiClient.delete<ApiResponse<void>>(
+      `/members/${membershipId}/roles/${assignmentId}`
+    );
   },
 };

@@ -2,6 +2,7 @@ package com.savdocrm.modules.identity.web;
 
 import com.savdocrm.modules.identity.application.TenantBootstrapService;
 import com.savdocrm.modules.identity.application.dto.CreateRoleRequest;
+import com.savdocrm.modules.tenancy.application.dto.CreateBranchCommand;
 import com.savdocrm.modules.identity.domain.MembershipStatus;
 import com.savdocrm.modules.identity.domain.Permissions;
 import com.savdocrm.modules.identity.domain.Role;
@@ -322,5 +323,33 @@ class MethodSecurityIntegrationTest {
                 .andExpect(jsonPath("$.data.tenantPermissions").isEmpty())
                 .andExpect(jsonPath("$.data.branchPermissions." + branchA.getId()).isArray())
                 .andExpect(jsonPath("$.data.branchPermissions." + branchB.getId()).doesNotExist());
+    }
+
+    @Test
+    @DisplayName("Method Security: User without tenancy.branches.manage cannot POST /api/v1/branches (403 Forbidden)")
+    void shouldDenyUserWithoutBranchManagePermission() throws Exception {
+        CreateBranchCommand command = new CreateBranchCommand("Unauthorized Branch", "BR-UNAUTH", "123 St", "+998901234567", false);
+
+        mockMvc.perform(post("/api/v1/branches")
+                        .header("Authorization", "Bearer " + cashierToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(command)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Access Denied"));
+    }
+
+    @Test
+    @DisplayName("Method Security: OWNER with tenancy.branches.manage can POST /api/v1/branches (201 Created)")
+    void shouldAllowOwnerWithBranchManagePermission() throws Exception {
+        CreateBranchCommand command = new CreateBranchCommand("Authorized Branch", "BR-AUTH", "123 St", "+998901234567", false);
+
+        mockMvc.perform(post("/api/v1/branches")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(command)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.code").value("BR-AUTH"))
+                .andExpect(jsonPath("$.data.isMain").value(false));
     }
 }

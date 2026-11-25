@@ -6,26 +6,30 @@ import { CreateBranchRequest } from '../model/types';
 export const branchKeys = {
   all: ['branches'] as const,
   list: (tenantId: string | undefined) => [...branchKeys.all, 'list', tenantId] as const,
-  detail: (id: string) => [...branchKeys.all, 'detail', id] as const,
+  detail: (tenantId: string | undefined, id: string) =>
+    [...branchKeys.all, 'detail', tenantId, id] as const,
 };
 
-export function useBranches() {
+export function useBranches(options?: { enabled?: boolean }) {
   const activeTenant = useAuthStore((s) => s.activeTenant);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   return useQuery({
     queryKey: branchKeys.list(activeTenant?.tenantId),
     queryFn: () => branchApi.getBranches(),
-    enabled: isAuthenticated && !!activeTenant,
+    enabled: isAuthenticated && !!activeTenant && (options?.enabled ?? true),
     staleTime: 60 * 1000,
   });
 }
 
 export function useBranch(id: string) {
+  const activeTenant = useAuthStore((s) => s.activeTenant);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
   return useQuery({
-    queryKey: branchKeys.detail(id),
+    queryKey: branchKeys.detail(activeTenant?.tenantId, id),
     queryFn: () => branchApi.getBranchById(id),
-    enabled: !!id,
+    enabled: isAuthenticated && !!activeTenant && !!id,
   });
 }
 

@@ -2,7 +2,6 @@ export type RoleScopeType = 'TENANT' | 'BRANCH';
 
 export interface Role {
   id: string;
-  tenantId: string;
   code: string;
   name: string;
   description?: string | null;
@@ -25,12 +24,19 @@ export interface UpdateRoleRequest {
   description?: string | null;
 }
 
+export interface RolePermissionResponse {
+  roleId: string;
+  roleCode: string;
+  permissions: string[];
+}
+
 export interface RolePermissionUpdateRequest {
   permissions: string[];
 }
 
 export interface UserRoleAssignment {
   id: string;
+  tenantId: string;
   membershipId: string;
   roleId: string;
   roleCode: string;
@@ -43,7 +49,7 @@ export interface UserRoleAssignment {
 }
 
 export interface CreateRoleAssignmentRequest {
-  membershipId?: string;
+  membershipId: string;
   roleId: string;
   scopeType: RoleScopeType;
   branchId?: string | null;

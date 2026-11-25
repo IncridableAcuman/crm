@@ -203,7 +203,7 @@ export async function executeCoordinatedRefresh(): Promise<string> {
 
     // Update in-memory state in the current tab
     useAuthStore.getState().setAccessToken(newAuth.accessToken);
-    if (newAuth.activeTenant) {
+    if (newAuth.activeTenant !== undefined) {
       useAuthStore.getState().setActiveTenant(newAuth.activeTenant);
     }
 

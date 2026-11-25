@@ -73,6 +73,7 @@ export const authApi = {
     try {
       await apiClient.post<ApiResponse<void>>('/auth/logout');
     } finally {
+      await queryClient.cancelQueries();
       useAuthStore.getState().clearAuth();
       queryClient.clear();
       clearSharedSessionState();

@@ -9,7 +9,12 @@ import {
 } from '@/entities/role';
 import { useBranches } from '@/entities/branch';
 import { useAuthStore } from '@/features/auth/model/useAuthStore';
-import { PermissionGuard } from '@/entities/permission';
+import {
+  useMyPermissions,
+  useHasAnyScopePermission,
+  PermissionGuard,
+} from '@/entities/permission';
+import { parseApiError } from '@/shared/api/errorHandler';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Label } from '@/shared/ui/label';
@@ -41,14 +46,25 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle2,
+  Info,
+  Search,
+  X,
 } from 'lucide-react';
-import { AxiosError } from 'axios';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const RoleAssignmentsPage: React.FC = () => {
   const { activeTenant } = useAuthStore();
-  const { data: assignments = [], isLoading, error } = useRoleAssignments();
+  const canReadBranches = useHasAnyScopePermission('tenancy.branches.read');
+
+  const [filterMembershipId, setFilterMembershipId] = useState('');
+  const [appliedFilter, setAppliedFilter] = useState<string | undefined>(undefined);
+  const [filterError, setFilterError] = useState<string | null>(null);
+
+  const { data: assignments = [], isLoading, error, refetch } = useRoleAssignments(appliedFilter);
   const { data: roles = [] } = useRoles();
-  const { data: branches = [] } = useBranches();
+  const { data: branches = [] } = useBranches({ enabled: canReadBranches });
+  const { data: myPermissions } = useMyPermissions();
 
   const assignRoleMutation = useAssignRole();
   const revokeRoleMutation = useRevokeRoleAssignment();
@@ -66,17 +82,87 @@ export const RoleAssignmentsPage: React.FC = () => {
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const activeRoles = roles.filter((r) => r.isActive);
+  const activeBranches = branches.filter((b) => b.isActive);
+  const selectedRole = activeRoles.find((r) => r.id === selectedRoleId);
+  const isOwnerRoleSelected = selectedRole?.code === 'OWNER';
+
+  const actorTenantPermissions = myPermissions?.tenantPermissions ?? [];
+  const actorMayBeOwner = actorTenantPermissions.includes('system.settings.manage');
+  const missingRolePermissions = selectedRole
+    ? (selectedRole.permissions ?? []).filter((p) => !actorTenantPermissions.includes(p))
+    : [];
+
+  const resetAssignForm = () => {
+    setSelectedRoleId('');
+    setMembershipId('');
+    setScopeType('TENANT');
+    setSelectedBranchId('');
+    setAssignError(null);
+  };
+
+  const handleAssignDialogChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      resetAssignForm();
+    } else {
+      setAssignError(null);
+    }
+  };
+
+  const handleRoleChange = (roleId: string) => {
+    setSelectedRoleId(roleId);
+    const role = activeRoles.find((r) => r.id === roleId);
+    if (role?.code === 'OWNER') {
+      // OWNER role can only be assigned at store-wide TENANT scope
+      setScopeType('TENANT');
+      setSelectedBranchId('');
+    }
+  };
+
+  const handleScopeChange = (nextScope: RoleScopeType) => {
+    setScopeType(nextScope);
+    if (nextScope === 'TENANT') {
+      setSelectedBranchId('');
+    }
+  };
+
+  const handleApplyFilter = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFilterError(null);
+    const trimmed = filterMembershipId.trim();
+    if (!trimmed) {
+      setAppliedFilter(undefined);
+      return;
+    }
+    if (!UUID_REGEX.test(trimmed)) {
+      setFilterError('Please enter a valid Membership UUID to filter.');
+      return;
+    }
+    setAppliedFilter(trimmed);
+  };
+
+  const handleClearFilter = () => {
+    setFilterMembershipId('');
+    setAppliedFilter(undefined);
+    setFilterError(null);
+  };
 
   const handleAssign = async (e: React.FormEvent) => {
     e.preventDefault();
     setAssignError(null);
 
-    if (!selectedRoleId) {
-      setAssignError('Please select a role.');
+    const trimmedMembershipId = membershipId.trim();
+
+    if (!trimmedMembershipId) {
+      setAssignError('Target Membership ID is required.');
       return;
     }
-    if (!membershipId.trim()) {
-      setAssignError('Target Membership ID is required.');
+    if (!UUID_REGEX.test(trimmedMembershipId)) {
+      setAssignError('Target Membership ID must be a valid UUID.');
+      return;
+    }
+    if (!selectedRoleId) {
+      setAssignError('Please select a role.');
       return;
     }
     if (scopeType === 'BRANCH' && !selectedBranchId) {
@@ -86,25 +172,18 @@ export const RoleAssignmentsPage: React.FC = () => {
 
     try {
       await assignRoleMutation.mutateAsync({
-        membershipId: membershipId.trim(),
+        membershipId: trimmedMembershipId,
         roleId: selectedRoleId,
         scopeType,
         branchId: scopeType === 'BRANCH' ? selectedBranchId : null,
       });
 
-      setSelectedRoleId('');
-      setMembershipId('');
-      setScopeType('TENANT');
-      setSelectedBranchId('');
+      resetAssignForm();
       setOpen(false);
     } catch (err: unknown) {
-      if (err instanceof AxiosError && err.response?.data?.detail) {
-        setAssignError(err.response.data.detail);
-      } else if (err instanceof AxiosError && err.response?.data?.message) {
-        setAssignError(err.response.data.message);
-      } else {
-        setAssignError('Failed to assign role. Verify member and permission privileges.');
-      }
+      setAssignError(
+        parseApiError(err, 'Failed to assign role. Verify member and permission privileges.').message
+      );
     }
   };
 
@@ -116,13 +195,9 @@ export const RoleAssignmentsPage: React.FC = () => {
       await revokeRoleMutation.mutateAsync(revokeAssignment.id);
       setRevokeAssignment(null);
     } catch (err: unknown) {
-      if (err instanceof AxiosError && err.response?.data?.detail) {
-        setRevokeError(err.response.data.detail);
-      } else if (err instanceof AxiosError && err.response?.data?.message) {
-        setRevokeError(err.response.data.message);
-      } else {
-        setRevokeError('Failed to revoke role assignment (Last Active Owner protection).');
-      }
+      setRevokeError(
+        parseApiError(err, 'Failed to revoke role assignment.').message
+      );
     }
   };
 
@@ -146,7 +221,7 @@ export const RoleAssignmentsPage: React.FC = () => {
         </div>
 
         <PermissionGuard permission="identity.roles.manage">
-          <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={handleAssignDialogChange}>
             <DialogTrigger asChild>
               <Button size="sm" className="gap-1.5 bg-slate-900 hover:bg-slate-800">
                 <UserPlus className="h-4 w-4" />
@@ -157,13 +232,13 @@ export const RoleAssignmentsPage: React.FC = () => {
               <DialogHeader>
                 <DialogTitle>Assign Role to Member</DialogTitle>
                 <DialogDescription>
-                  Grant a role with store-wide or branch-specific privileges.
+                  Grant a role with store-wide or branch-specific privileges. Self-assignment is blocked by backend policy.
                 </DialogDescription>
               </DialogHeader>
 
               <form onSubmit={handleAssign} className="space-y-4 py-2">
                 {assignError && (
-                  <div className="rounded-md bg-red-50 p-3 text-xs text-red-700 border border-red-200">
+                  <div role="alert" className="rounded-md bg-red-50 p-3 text-xs text-red-700 border border-red-200">
                     {assignError}
                   </div>
                 )}
@@ -178,7 +253,7 @@ export const RoleAssignmentsPage: React.FC = () => {
                     required
                   />
                   <span className="text-[11px] text-slate-400">
-                    Active member's membership ID in this tenant
+                    Active member&apos;s membership UUID in this tenant (your own membership cannot be self-elevated).
                   </span>
                 </div>
 
@@ -188,17 +263,29 @@ export const RoleAssignmentsPage: React.FC = () => {
                     id="role-select"
                     className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950"
                     value={selectedRoleId}
-                    onChange={(e) => setSelectedRoleId(e.target.value)}
+                    onChange={(e) => handleRoleChange(e.target.value)}
                     required
                   >
                     <option value="">-- Choose a Role --</option>
-                    {activeRoles.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name} ({r.code}) {r.isSystem ? '[SYSTEM]' : ''}
-                      </option>
-                    ))}
+                    {activeRoles.map((r) => {
+                      const isOwnerOption = r.code === 'OWNER';
+                      const disableOwner = isOwnerOption && myPermissions && !actorMayBeOwner;
+                      return (
+                        <option key={r.id} value={r.id} disabled={disableOwner}>
+                          {r.name} ({r.code}) {r.isSystem ? '[SYSTEM]' : ''}
+                          {disableOwner ? ' — OWNER only' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
+
+                {selectedRole && myPermissions && !actorMayBeOwner && missingRolePermissions.length > 0 && (
+                  <div className="rounded-md bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200">
+                    Grant-What-You-Hold Notice: You do not actively hold{' '}
+                    <span className="font-mono">{missingRolePermissions.join(', ')}</span>. Backend will reject assigning this role.
+                  </div>
+                )}
 
                 <div className="space-y-1.5">
                   <Label>Scope Type *</Label>
@@ -215,7 +302,7 @@ export const RoleAssignmentsPage: React.FC = () => {
                         name="scopeType"
                         value="TENANT"
                         checked={scopeType === 'TENANT'}
-                        onChange={() => setScopeType('TENANT')}
+                        onChange={() => handleScopeChange('TENANT')}
                       />
                       <div>
                         <div>TENANT Scope</div>
@@ -226,23 +313,26 @@ export const RoleAssignmentsPage: React.FC = () => {
                     </label>
 
                     <label
-                      className={`flex items-center gap-2 p-3 rounded-lg border text-xs cursor-pointer ${
-                        scopeType === 'BRANCH'
-                          ? 'border-slate-900 bg-slate-50 font-semibold'
-                          : 'border-slate-200 hover:bg-slate-50'
+                      className={`flex items-center gap-2 p-3 rounded-lg border text-xs ${
+                        isOwnerRoleSelected
+                          ? 'border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed'
+                          : scopeType === 'BRANCH'
+                          ? 'border-slate-900 bg-slate-50 font-semibold cursor-pointer'
+                          : 'border-slate-200 hover:bg-slate-50 cursor-pointer'
                       }`}
                     >
                       <input
                         type="radio"
                         name="scopeType"
                         value="BRANCH"
+                        disabled={isOwnerRoleSelected}
                         checked={scopeType === 'BRANCH'}
-                        onChange={() => setScopeType('BRANCH')}
+                        onChange={() => handleScopeChange('BRANCH')}
                       />
                       <div>
                         <div>BRANCH Scope</div>
                         <div className="text-[10px] text-slate-500 font-normal">
-                          Specific location only
+                          {isOwnerRoleSelected ? 'Not valid for OWNER' : 'Specific location only'}
                         </div>
                       </div>
                     </label>
@@ -260,14 +350,17 @@ export const RoleAssignmentsPage: React.FC = () => {
                       required
                     >
                       <option value="">-- Choose a Branch --</option>
-                      {branches
-                        .filter((b) => b.isActive)
-                        .map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.name} ({b.code})
-                          </option>
-                        ))}
+                      {activeBranches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.code})
+                        </option>
+                      ))}
                     </select>
+                    {activeBranches.length === 0 && (
+                      <p className="text-[11px] text-amber-600">
+                        No active branches available in this store.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -275,7 +368,7 @@ export const RoleAssignmentsPage: React.FC = () => {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setOpen(false)}
+                    onClick={() => handleAssignDialogChange(false)}
                     disabled={assignRoleMutation.isPending}
                   >
                     Cancel
@@ -297,12 +390,55 @@ export const RoleAssignmentsPage: React.FC = () => {
         </PermissionGuard>
       </div>
 
+      {/* Backend Member Directory Limitation Notice */}
+      <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-600 flex items-start gap-2.5">
+        <Info className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+        <span>
+          Assignments reference tenant members by <code className="font-mono text-slate-800">membershipId</code>. Member directory search (displaying employee name/email) is not yet exposed by the backend API in Milestone 04.
+        </span>
+      </div>
+
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Active Assignments</CardTitle>
-          <CardDescription className="text-xs">
-            Assigned roles in <strong className="text-slate-900">{activeTenant?.tenantName}</strong>.
-          </CardDescription>
+        <CardHeader className="pb-3 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">Active Assignments</CardTitle>
+              <CardDescription className="text-xs">
+                Assigned roles in <strong className="text-slate-900">{activeTenant?.tenantName}</strong>.
+              </CardDescription>
+            </div>
+
+            <form onSubmit={handleApplyFilter} className="flex items-center gap-2">
+              <div className="relative">
+                <Input
+                  aria-label="Filter by Membership ID"
+                  placeholder="Filter by Membership UUID..."
+                  value={filterMembershipId}
+                  onChange={(e) => setFilterMembershipId(e.target.value)}
+                  className="h-8 w-56 sm:w-64 text-xs font-mono pr-7"
+                />
+                {(filterMembershipId || appliedFilter) && (
+                  <button
+                    type="button"
+                    aria-label="Clear membership filter"
+                    onClick={handleClearFilter}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              <Button type="submit" variant="outline" size="sm" className="h-8 text-xs gap-1">
+                <Search className="h-3.5 w-3.5" />
+                <span>Filter</span>
+              </Button>
+            </form>
+          </div>
+          {filterError && (
+            <div role="alert" className="text-xs text-red-600">
+              {filterError}
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -311,8 +447,11 @@ export const RoleAssignmentsPage: React.FC = () => {
               <span>Loading assignments...</span>
             </div>
           ) : error ? (
-            <div className="p-4 text-center text-sm text-red-600 bg-red-50 rounded-lg">
-              Failed to load role assignments. Ensure you have the `identity.roles.read` permission.
+            <div role="alert" className="p-4 text-center text-sm text-red-600 bg-red-50 rounded-lg space-y-2">
+              <div>{parseApiError(error, 'Failed to load role assignments.').message}</div>
+              <Button variant="outline" size="sm" onClick={() => void refetch()}>
+                Retry
+              </Button>
             </div>
           ) : assignments.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500">
@@ -393,7 +532,10 @@ export const RoleAssignmentsPage: React.FC = () => {
                             variant="outline"
                             size="sm"
                             className="h-8 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-100"
-                            onClick={() => setRevokeAssignment(assignment)}
+                            onClick={() => {
+                              setRevokeError(null);
+                              setRevokeAssignment(assignment);
+                            }}
                           >
                             <Trash2 className="h-3.5 w-3.5 mr-1" />
                             Revoke
@@ -437,7 +579,7 @@ export const RoleAssignmentsPage: React.FC = () => {
             </div>
 
             {revokeError && (
-              <div className="rounded-md bg-red-50 p-3 text-xs text-red-700 border border-red-200">
+              <div role="alert" className="rounded-md bg-red-50 p-3 text-xs text-red-700 border border-red-200">
                 {revokeError}
               </div>
             )}

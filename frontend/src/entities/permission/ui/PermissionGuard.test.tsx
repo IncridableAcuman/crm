@@ -57,14 +57,14 @@ describe('PermissionGuard Component', () => {
 
     render(
       <PermissionGuard
-        permission="sales.pos.checkout"
+        permission="sales.orders.create"
         branchId="branch-123"
       >
         <span>POS Terminal</span>
       </PermissionGuard>
     );
 
-    expect(permissionQueries.useHasPermission).toHaveBeenCalledWith('sales.pos.checkout', 'branch-123');
+    expect(permissionQueries.useHasPermission).toHaveBeenCalledWith('sales.orders.create', 'branch-123');
     expect(screen.getByText('POS Terminal')).toBeInTheDocument();
   });
 });

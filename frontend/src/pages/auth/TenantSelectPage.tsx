@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../shared/ui/button';
 import { Store, CheckCircle, ArrowRight, LogOut, Loader2, AlertCircle } from 'lucide-react';
 import { TenantMembership } from '../../entities/user/model/types';
+import { parseApiError } from '../../shared/api/errorHandler';
 
 export const TenantSelectPage: React.FC = () => {
   const navigate = useNavigate();
@@ -31,16 +32,19 @@ export const TenantSelectPage: React.FC = () => {
       await queryClient.cancelQueries();
 
       const response = await authApi.selectTenant({ tenantId: tenant.tenantId });
-      setAccessToken(response.accessToken);
-      setActiveTenant(tenant);
 
-      // 2. Clear all cached queries so previous store data never leaks
+      // 2. Cancel again and purge all cached queries before committing new tenant state
+      await queryClient.cancelQueries();
       queryClient.clear();
 
+      setAccessToken(response.accessToken);
+      setActiveTenant(response.activeTenant ?? tenant);
+
       navigate('/');
-    } catch (err: any) {
-      const msg = err.response?.data?.detail || err.response?.data?.message || 'Failed to switch to store';
-      setError(msg);
+    } catch (err: unknown) {
+      // Restore previous visual selection on failure
+      setSelectedId(activeTenant?.tenantId || null);
+      setError(parseApiError(err, 'Failed to switch to store').message);
     } finally {
       setLoadingTenantId(null);
     }
@@ -119,8 +123,16 @@ export const TenantSelectPage: React.FC = () => {
                   return (
                     <div
                       key={tenant.tenantId}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => !isLoading && handleSelectStore(tenant)}
-                      className={`flex items-center justify-between p-4 rounded-lg border transition-all cursor-pointer ${
+                      onKeyDown={(e) => {
+                        if ((e.key === 'Enter' || e.key === ' ') && !isLoading) {
+                          e.preventDefault();
+                          void handleSelectStore(tenant);
+                        }
+                      }}
+                      className={`flex items-center justify-between p-4 rounded-lg border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 ${
                         selectedId === tenant.tenantId
                           ? 'border-slate-900 bg-slate-50 shadow-sm'
                           : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'

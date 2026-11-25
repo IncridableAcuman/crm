@@ -5,7 +5,7 @@ import { permissionApi } from '../api/permissionApi';
 export const permissionKeys = {
   all: ['permissions'] as const,
   mine: (tenantId: string | undefined) => [...permissionKeys.all, 'mine', tenantId] as const,
-  catalog: () => [...permissionKeys.all, 'catalog'] as const,
+  catalog: (tenantId: string | undefined) => [...permissionKeys.all, 'catalog', tenantId] as const,
 };
 
 export function useMyPermissions() {
@@ -20,13 +20,15 @@ export function useMyPermissions() {
   });
 }
 
-export function usePermissionsCatalog() {
+export function usePermissionsCatalog(options?: { enabled?: boolean }) {
+  const activeTenant = useAuthStore((s) => s.activeTenant);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const canReadRoles = useHasPermission('identity.roles.read');
 
   return useQuery({
-    queryKey: permissionKeys.catalog(),
+    queryKey: permissionKeys.catalog(activeTenant?.tenantId),
     queryFn: () => permissionApi.getAllPermissions(),
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && !!activeTenant && canReadRoles && (options?.enabled ?? true),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
@@ -34,6 +36,7 @@ export function usePermissionsCatalog() {
 /**
  * Hook to check if current user has a specific permission in the active store,
  * optionally scoped to a branch.
+ * Fail-closed: returns false while loading, on error, or when unauthenticated.
  */
 export function useHasPermission(permissionCode: string, branchId?: string): boolean {
   const { data: permissions } = useMyPermissions();
@@ -42,7 +45,7 @@ export function useHasPermission(permissionCode: string, branchId?: string): boo
     return false;
   }
 
-  // Tenant-level check
+  // Tenant-level check (TENANT scope satisfies both tenant and branch checks)
   if (permissions.tenantPermissions?.includes(permissionCode)) {
     return true;
   }
@@ -53,6 +56,32 @@ export function useHasPermission(permissionCode: string, branchId?: string): boo
     if (branchPerms && branchPerms.includes(permissionCode)) {
       return true;
     }
+  }
+
+  return false;
+}
+
+/**
+ * Checks whether the current user holds a permission at TENANT scope OR at least one BRANCH scope.
+ * Useful for visibility of branch-list pages where branch-scoped roles (e.g. MANAGER, CASHIER)
+ * hold `tenancy.branches.read` on their assigned branch.
+ * Fail-closed: returns false while loading, on error, or when unauthenticated.
+ */
+export function useHasAnyScopePermission(permissionCode: string): boolean {
+  const { data: permissions } = useMyPermissions();
+
+  if (!permissions) {
+    return false;
+  }
+
+  if (permissions.tenantPermissions?.includes(permissionCode)) {
+    return true;
+  }
+
+  if (permissions.branchPermissions) {
+    return Object.values(permissions.branchPermissions).some((perms) =>
+      perms.includes(permissionCode)
+    );
   }
 
   return false;

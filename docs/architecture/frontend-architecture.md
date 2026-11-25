@@ -204,6 +204,19 @@ useBarcodeScanner({
 
 ## 7. Form Handling & Client Validation
 
-All forms use **React Hook Form** paired with **Zod** schemas for runtime type safety:
+All forms use **React Hook Form** paired with **Zod** schemas or explicit client-side validation for runtime type safety, alongside the centralized `parseApiError` utility (`src/shared/api/errorHandler.ts`):
 - Instant client-side validation before network transmission.
-- Seamless backend error mapping: When the backend returns an RFC 7807 `400 Bad Request` with field-level rejection errors, the form automatically marks the corresponding input fields with error messages.
+- Seamless backend error mapping: When the backend returns an RFC 7807 `ProblemDetail` (`400`, `401`, `403`, `404`, `409`, `422`, `500`), network errors, or timeouts, `parseApiError` extracts user-friendly messages and field-level `errors` without exposing internal stack traces.
+
+## 8. RBAC UI & Permission Gating (M04.5)
+
+- **Entities**:
+  - `entities/permission`: `permissionApi` (`/permissions`, `/me/permissions`), `useMyPermissions`, `usePermissionsCatalog` (tenant-scoped query keys), `useHasPermission`, `useHasAnyScopePermission`, `PermissionGuard`, and `getPermissionLabel` / `getModuleLabel` (dynamic 33-permission label mapping with safe fallback for future codes).
+  - `entities/role`: `roleApi` (`/roles`, `/roles/{id}/permissions`, `/role-assignments`, `/members/{membershipId}/roles`), tenant-scoped query keys, and mutations invalidating role & effective permission caches.
+  - `entities/branch`: `branchApi` (`/branches`), aligned with `BranchDto` (`isMain`, no `timezone`), tenant-scoped query keys.
+- **Route & Element Guards**:
+  - `PermissionRoute` (`src/app/routes/PermissionRoute.tsx`) enforces fail-closed route authorization on `/branches`, `/roles`, and `/assignments` during loading, on API errors (with Retry), and on permission denial.
+  - `PermissionGuard` gates action buttons (create/edit/delete role, create branch, assign/revoke role).
+- **Dashboard & Tenant Isolation**:
+  - `HomePage` gates `useBranches`, `useRoles`, and `useRoleAssignments` by user permissions, displays loading/restricted/error states without misleading zero values, and renders both `TENANT` and `BRANCH` scoped effective permissions.
+  - `TenantSelectPage` and `authApi.logout` cancel in-flight queries and clear TanStack Query cache (`queryClient.cancelQueries()` + `queryClient.clear()`).

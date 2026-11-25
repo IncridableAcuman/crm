@@ -78,7 +78,7 @@ gantt
 ---
 
 ## Milestone 04: Scoped RBAC & Permissions
-- **Status**: Core Domain & Authorization Engine Implemented (M04.3 Completed)
+- **Status**: Completed & Audited (M04.1–M04.5 Completed)
 - **Sub-Milestones**:
   - **M04.1**: Architecture & Scoping Specification (Completed).
   - **M04.2**: Database Schema, Liquibase Migrations & Security Audit (Completed — migrations 09–15).
@@ -91,7 +91,11 @@ gantt
     - Lifecycle & Bootstrap: Atomic tenant registration RBAC bootstrap and existing tenant bootstrap in `TenantBootstrapService`.
     - Role Management: `RoleAssignmentService` enforcing Grant-What-You-Hold, Owner Guard, self-elevation prevention, and historical audit preservation.
   - **M04.4**: REST Controllers, Role & Assignment APIs & Spring Security Integration (Completed & Verified).
-  - **M04.5**: Frontend RBAC Guards & Administration UI (Next Step).
+  - **M04.5**: Frontend RBAC Guards & Administration UI (Completed & Audited — 171 backend tests, 56 frontend tests):
+    - Dynamic 33-permission catalog integration via `GET /api/v1/permissions` with readable label mapping.
+    - All 7 system roles rendered read-only and immutable; custom role lifecycle (create, edit details, edit permissions, delete/soft-deactivate).
+    - Fail-closed `PermissionGuard` and route-level `PermissionRoute`, tenant-scoped query cache isolation, `TENANT`/`BRANCH` assignment scope UI, and RFC7807 ProblemDetail error handling.
+    - Known limitation: `UserRoleAssignmentDto` exposes `membershipId` only; member directory search endpoint is not yet implemented in M04.
 - **Backend Objectives**:
   - 2-tier active scope hierarchy in M04: Tenant and Branch (Warehouse deferred until inventory module).
   - Entities: `Role`, `Permission`, `RolePermission`, `UserRoleAssignment` (scoped to `branch_id`).

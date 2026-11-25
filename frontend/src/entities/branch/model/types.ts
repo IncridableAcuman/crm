@@ -5,8 +5,8 @@ export interface Branch {
   name: string;
   phone?: string | null;
   address?: string | null;
-  timezone: string;
   isActive: boolean;
+  isMain: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -16,5 +16,5 @@ export interface CreateBranchRequest {
   name: string;
   phone?: string | null;
   address?: string | null;
-  timezone: string;
+  isMain: boolean;
 }

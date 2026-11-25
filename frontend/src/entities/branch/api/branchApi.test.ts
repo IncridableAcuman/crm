@@ -22,8 +22,8 @@ describe('branchApi', () => {
     name: 'Chorsu Store',
     phone: '+998901234567',
     address: 'Chorsu Bazaar',
-    timezone: 'Asia/Tashkent',
     isActive: true,
+    isMain: true,
     createdAt: '2026-11-24T12:00:00Z',
     updatedAt: '2026-11-24T12:00:00Z',
   };
@@ -41,6 +41,7 @@ describe('branchApi', () => {
     expect(apiClient.get).toHaveBeenCalledWith('/branches');
     expect(branches).toHaveLength(1);
     expect(branches[0]?.code).toBe('BR-01');
+    expect(branches[0]?.isMain).toBe(true);
   });
 
   it('fetches a single branch by id', async () => {
@@ -57,17 +58,17 @@ describe('branchApi', () => {
     expect(branch.name).toBe('Chorsu Store');
   });
 
-  it('creates a new branch', async () => {
+  it('creates a new branch matching backend CreateBranchCommand', async () => {
     const payload: CreateBranchRequest = {
       code: 'BR-02',
       name: 'Yunusobod Branch',
-      timezone: 'Asia/Tashkent',
+      isMain: false,
     };
 
     vi.mocked(apiClient.post).mockResolvedValueOnce({
       data: {
         success: true,
-        data: { ...mockBranch, id: 'branch-2', code: 'BR-02', name: 'Yunusobod Branch' },
+        data: { ...mockBranch, id: 'branch-2', code: 'BR-02', name: 'Yunusobod Branch', isMain: false },
         timestamp: '2026-11-24T12:00:00Z',
       },
     });
@@ -76,5 +77,6 @@ describe('branchApi', () => {
     expect(apiClient.post).toHaveBeenCalledWith('/branches', payload);
     expect(created.id).toBe('branch-2');
     expect(created.code).toBe('BR-02');
+    expect(created.isMain).toBe(false);
   });
 });

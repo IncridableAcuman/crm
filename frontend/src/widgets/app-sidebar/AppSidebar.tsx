@@ -11,18 +11,27 @@ import {
 } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { Badge } from '@/shared/ui/badge';
-import { useHasPermission } from '@/entities/permission/model/permissionQueries';
+import { useHasPermission, useHasAnyScopePermission } from '@/entities/permission';
 
 interface NavItem {
   title: string;
   to: string;
   icon: React.ElementType;
   permission?: string;
+  allowBranchScope?: boolean;
   badge?: string;
 }
 
-export const AppSidebar: React.FC = () => {
-  const canReadBranches = useHasPermission('branches.read');
+interface AppSidebarProps {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}
+
+export const AppSidebar: React.FC<AppSidebarProps> = ({
+  mobileOpen = false,
+  onClose,
+}) => {
+  const canReadBranches = useHasAnyScopePermission('tenancy.branches.read');
   const canReadRoles = useHasPermission('identity.roles.read');
 
   const mainNavItems: NavItem[] = [
@@ -35,7 +44,8 @@ export const AppSidebar: React.FC = () => {
       title: 'Store Branches',
       to: '/branches',
       icon: GitBranch,
-      permission: 'branches.read',
+      permission: 'tenancy.branches.read',
+      allowBranchScope: true,
     },
     {
       title: 'Roles & Permissions',
@@ -72,16 +82,16 @@ export const AppSidebar: React.FC = () => {
     },
   ];
 
-  return (
-    <aside className="w-64 border-r border-slate-200 bg-slate-50/50 min-h-[calc(100vh-4rem)] flex flex-col justify-between p-4">
+  const sidebarContent = (
+    <div className="flex h-full flex-col justify-between p-4">
       <div className="space-y-6">
         <div>
           <div className="px-3 mb-2 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
             Store Management
           </div>
-          <nav className="space-y-1">
+          <nav className="space-y-1" aria-label="Main navigation">
             {mainNavItems.map((item) => {
-              if (item.permission === 'branches.read' && !canReadBranches) {
+              if (item.permission === 'tenancy.branches.read' && !canReadBranches) {
                 return null;
               }
               if (item.permission === 'identity.roles.read' && !canReadRoles) {
@@ -94,6 +104,7 @@ export const AppSidebar: React.FC = () => {
                   key={item.to}
                   to={item.to}
                   end={item.to === '/'}
+                  onClick={onClose}
                   className={({ isActive }) =>
                     cn(
                       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all',
@@ -103,7 +114,7 @@ export const AppSidebar: React.FC = () => {
                     )
                   }
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-4 w-4 shrink-0" />
                   <span>{item.title}</span>
                 </NavLink>
               );
@@ -121,10 +132,11 @@ export const AppSidebar: React.FC = () => {
               return (
                 <div
                   key={item.title}
+                  aria-disabled="true"
                   className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed select-none"
                 >
                   <div className="flex items-center gap-3">
-                    <Icon className="h-4 w-4 text-slate-300" />
+                    <Icon className="h-4 w-4 text-slate-300 shrink-0" />
                     <span>{item.title}</span>
                   </div>
                   {item.badge && (
@@ -140,7 +152,7 @@ export const AppSidebar: React.FC = () => {
       </div>
 
       {/* Security Status Footer */}
-      <div className="rounded-lg bg-white border border-slate-200 p-3 shadow-xs">
+      <div className="rounded-lg bg-white border border-slate-200 p-3 shadow-xs mt-6">
         <div className="flex items-center gap-2 text-emerald-600 font-semibold text-xs">
           <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
           <span>Tenant Scoped & Secure</span>
@@ -149,6 +161,29 @@ export const AppSidebar: React.FC = () => {
           Dual-Phase JWT & Fine-Grained RBAC active.
         </p>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop / Tablet Sidebar */}
+      <aside className="hidden md:block w-64 shrink-0 border-r border-slate-200 bg-slate-50/50 min-h-[calc(100vh-4rem)]">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile Drawer Sidebar */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs"
+            onClick={onClose}
+            aria-hidden="true"
+          />
+          <aside className="relative z-10 w-64 max-w-[80vw] bg-slate-50 border-r border-slate-200 min-h-screen shadow-xl">
+            {sidebarContent}
+          </aside>
+        </div>
+      )}
+    </>
   );
 };

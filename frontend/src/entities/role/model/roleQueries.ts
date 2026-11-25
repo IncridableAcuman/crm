@@ -11,36 +11,46 @@ import { permissionKeys } from '@/entities/permission/model/permissionQueries';
 export const roleKeys = {
   all: ['roles'] as const,
   list: (tenantId: string | undefined) => [...roleKeys.all, 'list', tenantId] as const,
-  detail: (id: string) => [...roleKeys.all, 'detail', id] as const,
-  permissions: (id: string) => [...roleKeys.all, 'permissions', id] as const,
+  detail: (tenantId: string | undefined, id: string) =>
+    [...roleKeys.all, 'detail', tenantId, id] as const,
+  permissions: (tenantId: string | undefined, id: string) =>
+    [...roleKeys.all, 'permissions', tenantId, id] as const,
   assignments: (tenantId: string | undefined) => ['role-assignments', tenantId] as const,
+  memberRoles: (tenantId: string | undefined, membershipId: string) =>
+    ['role-assignments', tenantId, 'member', membershipId] as const,
 };
 
-export function useRoles() {
+export function useRoles(options?: { enabled?: boolean }) {
   const activeTenant = useAuthStore((s) => s.activeTenant);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   return useQuery({
     queryKey: roleKeys.list(activeTenant?.tenantId),
     queryFn: () => roleApi.getRoles(),
-    enabled: isAuthenticated && !!activeTenant,
+    enabled: isAuthenticated && !!activeTenant && (options?.enabled ?? true),
     staleTime: 60 * 1000,
   });
 }
 
 export function useRole(roleId: string) {
+  const activeTenant = useAuthStore((s) => s.activeTenant);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
   return useQuery({
-    queryKey: roleKeys.detail(roleId),
+    queryKey: roleKeys.detail(activeTenant?.tenantId, roleId),
     queryFn: () => roleApi.getRoleById(roleId),
-    enabled: !!roleId,
+    enabled: isAuthenticated && !!activeTenant && !!roleId,
   });
 }
 
 export function useRolePermissions(roleId: string) {
+  const activeTenant = useAuthStore((s) => s.activeTenant);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
   return useQuery({
-    queryKey: roleKeys.permissions(roleId),
+    queryKey: roleKeys.permissions(activeTenant?.tenantId, roleId),
     queryFn: () => roleApi.getRolePermissions(roleId),
-    enabled: !!roleId,
+    enabled: isAuthenticated && !!activeTenant && !!roleId,
   });
 }
 
@@ -70,7 +80,7 @@ export function useUpdateRole() {
         queryKey: roleKeys.list(activeTenant?.tenantId),
       });
       queryClient.invalidateQueries({
-        queryKey: roleKeys.detail(variables.roleId),
+        queryKey: roleKeys.detail(activeTenant?.tenantId, variables.roleId),
       });
     },
   });
@@ -102,10 +112,10 @@ export function useUpdateRolePermissions() {
         queryKey: roleKeys.list(activeTenant?.tenantId),
       });
       queryClient.invalidateQueries({
-        queryKey: roleKeys.detail(variables.roleId),
+        queryKey: roleKeys.detail(activeTenant?.tenantId, variables.roleId),
       });
       queryClient.invalidateQueries({
-        queryKey: roleKeys.permissions(variables.roleId),
+        queryKey: roleKeys.permissions(activeTenant?.tenantId, variables.roleId),
       });
       // Invalidate current user permissions as permissions might have updated
       queryClient.invalidateQueries({
@@ -115,14 +125,14 @@ export function useUpdateRolePermissions() {
   });
 }
 
-export function useRoleAssignments(membershipId?: string) {
+export function useRoleAssignments(membershipId?: string, options?: { enabled?: boolean }) {
   const activeTenant = useAuthStore((s) => s.activeTenant);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   return useQuery({
     queryKey: [...roleKeys.assignments(activeTenant?.tenantId), membershipId],
     queryFn: () => roleApi.getRoleAssignments(membershipId),
-    enabled: isAuthenticated && !!activeTenant,
+    enabled: isAuthenticated && !!activeTenant && (options?.enabled ?? true),
     staleTime: 30 * 1000,
   });
 }
