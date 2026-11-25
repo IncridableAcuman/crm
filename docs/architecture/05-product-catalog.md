@@ -224,7 +224,7 @@ classDiagram
   - Explicitly modeled in `product_barcodes` (`0..N` per `ProductVariant`).
   - **Empty/null**: Never stored as blank strings; variants without barcodes simply have 0 rows in `product_barcodes`.
   - **Normalization**: Trimmed string (`VARCHAR(100)`, non-blank). Preserves exact case for Code-128 or normalized digits for EAN/UPC.
-  - **Uniqueness**: `UNIQUE (tenant_id, barcode)` ensures fast, unambiguous `O(log N)` POS scanner lookup (`GET /api/v1/products/lookup?barcode=...` or `ProductQueryFacade.findByBarcode`). Different tenants can sell identical manufacturer EAN-13 codes independently.
+  - **Uniqueness**: `UNIQUE (tenant_id, barcode)` ensures fast, unambiguous `O(log N)` POS scanner lookup (`GET /api/v1/products/lookup?code=...` or `ProductQueryFacade.findActiveVariantByBarcode`). Different tenants can sell identical manufacturer EAN-13 codes independently.
   - **Primary Barcode**: At most one `is_primary = true` per variant via PostgreSQL partial unique index.
 
 ---
@@ -288,10 +288,10 @@ graph LR
 ```
 
 - **`ProductQueryFacade` (`com.savdocrm.modules.catalog.application.facade`)**:
-  - `Optional<VariantCatalogDto> findVariantById(UUID tenantId, UUID variantId)`
-  - `List<VariantCatalogDto> findVariantsByIds(UUID tenantId, Set<UUID> variantIds)`
-  - `Optional<VariantCatalogDto> findActiveVariantByBarcode(UUID tenantId, String barcode)`
-  - `Optional<VariantCatalogDto> findActiveVariantBySku(UUID tenantId, String sku)`
+  - `Optional<VariantCatalogDto> findVariantById(UUID variantId)`
+  - `List<VariantCatalogDto> findVariantsByIds(Set<UUID> variantIds)`
+  - `Optional<VariantCatalogDto> findActiveVariantByBarcode(String barcode)`
+  - `Optional<VariantCatalogDto> findActiveVariantBySku(String sku)`
 - **`VariantCatalogDto`** exposes: `variantId`, `productId`, `productName`, `variantName`, `sku`, `primaryBarcode`, `optionValues`, `unitId`, `unitCode`, `unitSymbol`, `allowDecimal`, `decimalPrecision`, `referenceCostPrice`, `sellingPrice`, `productStatus`, `variantActive`, `sellable` (`productStatus == ACTIVE && variantActive`).
 - **Zero Circular Dependencies**: `Inventory`, `Sales`, and `Purchases` depend on `Catalog`'s public facade DTOs; `Catalog` has zero dependencies on any downstream module.
 - **Cross-Module Deletion Hook (M06+)**: When `Inventory` and `Sales` are introduced, PostgreSQL `ON DELETE RESTRICT` FKs (`inventory_stocks.variant_id`, `inventory_transactions.variant_id`, `sale_items.variant_id`, `purchase_order_items.variant_id`) physically prevent deleting referenced variants, and `ProductService.deleteOrArchiveProduct` falls back to `ARCHIVED` on constraint/reference detection (mirroring M04's `RoleService.deleteOrDeactivateRole` pattern).
