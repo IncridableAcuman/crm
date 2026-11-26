@@ -62,7 +62,7 @@ class ProductVariantAndBarcodeServiceTest {
         TenantContextHolder.setContext(TenantContext.of(tenantId));
         CatalogVariantHelper helper = new CatalogVariantHelper(variantRepository, barcodeRepository);
         variantService = new ProductVariantService(productRepository, variantRepository, barcodeRepository, helper);
-        barcodeService = new ProductBarcodeService(barcodeRepository, variantRepository);
+        barcodeService = new ProductBarcodeService(barcodeRepository, variantRepository, productRepository);
     }
 
     @AfterEach
@@ -130,11 +130,17 @@ class ProductVariantAndBarcodeServiceTest {
     @Test
     @DisplayName("Barcode service swaps primary barcode safely and rejects duplicates")
     void barcodeService_primarySwapAndDuplicateGuard() {
+        UUID prodId = UUID.randomUUID();
+        Product activeProduct = Product.create(tenantId, null, UUID.randomUUID(), "Active", null, null, ProductType.SIMPLE, List.of(), ProductStatus.ACTIVE);
+        activeProduct.setId(prodId);
+
         UUID variantId = UUID.randomUUID();
-        ProductVariant variant = ProductVariant.builder().productId(UUID.randomUUID()).sku("SKU-1").name("V").build();
+        ProductVariant variant = ProductVariant.builder().productId(prodId).sku("SKU-1").name("V").build();
         variant.setId(variantId);
         variant.setTenantId(tenantId);
 
+        when(productRepository.findByTenantIdAndIdWithLock(tenantId, prodId)).thenReturn(Optional.of(activeProduct));
+        when(variantRepository.findByTenantIdAndId(tenantId, variantId)).thenReturn(Optional.of(variant));
         when(variantRepository.findByTenantIdAndIdWithLock(tenantId, variantId)).thenReturn(Optional.of(variant));
         when(barcodeRepository.existsByTenantIdAndBarcode(tenantId, "460111")).thenReturn(true);
 
@@ -160,26 +166,39 @@ class ProductVariantAndBarcodeServiceTest {
     }
 
     @Test
-    @DisplayName("Archived product rejects variant mutations until restored")
+    @DisplayName("Archived product rejects variant and barcode mutations until restored")
     void archivedProduct_rejectsVariantMutations() {
         UUID prodId = UUID.randomUUID();
         Product archived = Product.create(tenantId, null, UUID.randomUUID(), "Archived", null, null, ProductType.VARIABLE, List.of("Size"), ProductStatus.ACTIVE);
         archived.setId(prodId);
         archived.transitionStatus(ProductStatus.ARCHIVED, false);
 
+        UUID variantId = UUID.randomUUID();
+        UUID barcodeId = UUID.randomUUID();
+        ProductBarcode barcode = ProductBarcode.create(tenantId, variantId, "460999", BarcodeType.EAN13, true);
+        barcode.setId(barcodeId);
+
         when(productRepository.findByTenantIdAndIdWithLock(tenantId, prodId)).thenReturn(Optional.of(archived));
+        when(barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)).thenReturn(Optional.of(barcode));
 
         assertThatThrownBy(() -> variantService.addVariant(prodId, new CreateVariantCommand(
                 "ARC-1", "S", Map.of("Size", "S"), BigDecimal.ONE, BigDecimal.TEN, false, List.of()
         ))).isInstanceOf(InvalidProductConfigurationException.class);
-        assertThatThrownBy(() -> variantService.updateVariant(prodId, UUID.randomUUID(), new UpdateVariantCommand(
+        assertThatThrownBy(() -> variantService.updateVariant(prodId, variantId, new UpdateVariantCommand(
                 "ARC-1", "S", Map.of("Size", "S"), BigDecimal.ONE, BigDecimal.TEN
         ))).isInstanceOf(InvalidProductConfigurationException.class);
-        assertThatThrownBy(() -> variantService.changeDefaultVariant(prodId, UUID.randomUUID()))
+        assertThatThrownBy(() -> variantService.changeDefaultVariant(prodId, variantId))
                 .isInstanceOf(InvalidProductConfigurationException.class);
-        assertThatThrownBy(() -> variantService.deactivateVariant(prodId, UUID.randomUUID()))
+        assertThatThrownBy(() -> variantService.deactivateVariant(prodId, variantId))
                 .isInstanceOf(InvalidProductConfigurationException.class);
-        assertThatThrownBy(() -> variantService.activateVariant(prodId, UUID.randomUUID()))
+        assertThatThrownBy(() -> variantService.activateVariant(prodId, variantId))
+                .isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> barcodeService.addBarcode(prodId, variantId, new AddBarcodeCommand(
+                "460888", BarcodeType.EAN13, false
+        ))).isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> barcodeService.setPrimaryBarcode(prodId, variantId, barcodeId))
+                .isInstanceOf(InvalidProductConfigurationException.class);
+        assertThatThrownBy(() -> barcodeService.removeBarcode(prodId, variantId, barcodeId))
                 .isInstanceOf(InvalidProductConfigurationException.class);
     }
 }

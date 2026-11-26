@@ -206,4 +206,4 @@
 - **Known Limitations**:
   - `DELETE /api/v1/products/{productId}` supports only `DRAFT` deletion per `ProductService.deleteDraftProduct`; `ACTIVE` products must be archived via `POST /archive` or `PATCH /status`.
   - No downstream Inventory/Sales/Purchases reference checks exist yet until M06–M08.
-  - Frontend UI (`M05.5`) is implemented (`e95d3d6`), while end-to-end live backend/frontend contract verification (`M05.6`) remains planned.
+  - Frontend UI (`M05.5`) and M05.6 audit (`276/276` backend, `76/76` frontend, live Spring Boot + PostgreSQL 16 + Vite HTTP contract checks) are complete; only headless browser DOM E2E remains untested due to host browser absence ([m05-integration-security-quality-audit.md](../testing/m05-integration-security-quality-audit.md)).

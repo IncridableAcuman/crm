@@ -1,6 +1,6 @@
 # SAVDOCRM — Milestone 05: Product Catalog & Category Management Architecture
 
-- **Status**: M05.1–M05.5 Implemented & Verified (Architecture, Schema, Domain Model, Repositories, Core Services, Public Facade, REST API & RBAC, React FSD Frontend); M05.6 Integration, Security & Quality Audit Planned
+- **Status**: M05.1–M05.6 Completed — Pass With Limitations (Architecture, Schema, Domain Model, Repositories, Core Services, Public Facade, REST API & RBAC, React FSD Frontend, Integration & Security Audit)
 - **Version**: 1.2.0
 - **Context**: Milestone 05 — `Catalog` Bounded Context (`com.savdocrm.modules.catalog`)
 - **Related ADRs**:
@@ -333,7 +333,6 @@ graph LR
 - **Database-Level Pagination & Tree Query (`CatalogQueryService`)**: Paginated product search uses `JpaSpecificationExecutor<Product>` (`tenantId`-scoped `Criteria` + escaped `LIKE` + `IN`/subqueries), allowlisted sort fields (`name`, `createdAt`, `updatedAt`, `status`, `brand`, `productType`), and O(1) batch assembly; category tree assembly builds the hierarchy in memory from a single sorted query.
 - **RBAC Scope Enforcement**: Catalog read endpoints require `TENANT` scope (`hasPermission`) when optional `branchId` is omitted and evaluate `hasBranchPermission` when `branchId` is provided (so single-branch assignments cannot grant unrestricted tenant-wide access without `?branchId=`), while all catalog writes enforce `TENANT` scope via `hasPermission` (with archive and draft deletion gated by `catalog.products.delete`).
 
-### 10.7 Known Limitations & Deferred Scope (M05.6 / M06+)
-- **M05.4–M05.5 Behavioral Notes**: `DELETE /api/v1/products/{productId}` physically deletes `DRAFT` products only (`ACTIVE` products use `POST /archive` or `PATCH /status`); UOM writes reuse `catalog.categories.manage` (`TENANT` scope) per `ADR-0010` without adding a 34th permission; M05.5 frontend tests verify UI and branch-scope cache behavior with mocked API clients (`74/74` Vitest + `tsc && vite build` passing).
-- **Remaining in M05.6 (Planned)**: End-to-end live backend/frontend contract audit, full-stack multi-tenant/branch cache isolation verification, and combined regression closeout before M06.
+### 10.7 Known Limitations & Deferred Scope (M06+)
+- **M05.4–M05.6 Behavioral & Audit Notes**: `DELETE /api/v1/products/{productId}` physically deletes `DRAFT` products only (`ACTIVE` products use `POST /archive` or `PATCH /status`); UOM writes reuse `catalog.categories.manage` (`TENANT` scope) per `ADR-0010` without adding a 34th permission; `ProductBarcodeService` locks the parent `Product` and rejects barcode mutations on `ARCHIVED` products; M05.6 verified `276/276` backend tests, `76/76` frontend tests, `tsc && vite build`, and live Spring Boot + PostgreSQL 16 + Vite preview HTTP integration, while headless browser DOM E2E was not executed due to missing host browser tooling ([m05-integration-security-quality-audit.md](../testing/m05-integration-security-quality-audit.md)).
 - **Deferred to M06+**: Image upload/storage, inventory stock ledger, pricing history, and multi-unit UOM conversions.

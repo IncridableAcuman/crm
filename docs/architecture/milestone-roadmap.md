@@ -109,7 +109,7 @@ gantt
 ---
 
 ## Milestone 05: Product Catalog & Category Management
-- **Status**: Core Implementation Completed (M05.1–M05.5 Completed & Verified); Roadmap Closeout Audit Pending (M05.6 Planned; M06 Not Started)
+- **Status**: Completed — Pass With Limitations (M05.1–M05.6 Completed & Audited; M06 Not Started)
 - **Sub-Milestones**:
   - **M05.1 — Architecture & Domain Design** *(Completed — Design-Only)*:
     - **Scope**: Bounded context definition, `Product`/`ProductVariant`/`ProductBarcode`/`Category`/`UnitOfMeasure` domain model, database schema, REST API & RBAC contracts, frontend FSD blueprint, and ADRs (`ADR-0008`–`ADR-0010`).
@@ -136,10 +136,11 @@ gantt
     - **Dependencies**: M05.4.
     - **Verification & Known Limitations**: Verified via Vitest (`19` test files, `74/74` tests passing including `18` new catalog tests against mocked API clients) and `tsc && vite build` (`PASS`, with non-fatal chunk-size warning); repository ESLint config is absent; live full-stack E2E verification remains for M05.6.
     - **Exclusions**: POS checkout, stock balances, image uploads.
-  - **M05.6 — Integration, Security & Quality Audit** *(Planned — Next Milestone)*:
-    - **Scope**: End-to-end live backend/frontend contract audit, full-stack multi-tenant & branch-scope cache isolation verification, and combined post-M05.5 ArchUnit & backend/frontend regression sign-off to close Milestone 05 prior to M06 Inventory.
+  - **M05.6 — Integration, Security & Quality Audit** *(Completed — Pass With Limitations)*:
+    - **Scope**: End-to-end backend/frontend contract audit, auth/tenant-spoofing & RBAC security verification, archived barcode invariant hardening (`ProductBarcodeService`), multi-tenant & branch cache isolation (`catalogCacheIsolation.test.tsx`), live Spring Boot + PostgreSQL 16 + Vite integration verification, and full regression (`276/276` backend tests, `9/9` ArchUnit rules, `76/76` frontend tests, `tsc && vite build`).
     - **Dependencies**: M05.5.
-    - **Exclusions**: M06 Inventory implementation (not yet started).
+    - **Audit Report & Limitations**: See [m05-integration-security-quality-audit.md](../testing/m05-integration-security-quality-audit.md). Headless browser DOM E2E and ESLint were not executed due to missing host browser binary and project ESLint configuration.
+    - **Exclusions**: M06 Inventory implementation (not yet started; next planned milestone upon explicit approval).
 
 ---
 

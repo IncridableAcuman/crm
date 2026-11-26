@@ -4,12 +4,16 @@ import com.savdocrm.modules.catalog.application.dto.AddBarcodeCommand;
 import com.savdocrm.modules.catalog.application.dto.ProductBarcodeDto;
 import com.savdocrm.modules.catalog.application.dto.UpdateBarcodeCommand;
 import com.savdocrm.modules.catalog.domain.CatalogValidation;
+import com.savdocrm.modules.catalog.domain.Product;
 import com.savdocrm.modules.catalog.domain.ProductBarcode;
 import com.savdocrm.modules.catalog.domain.ProductVariant;
 import com.savdocrm.modules.catalog.domain.exception.DuplicateBarcodeException;
+import com.savdocrm.modules.catalog.domain.exception.InvalidProductConfigurationException;
 import com.savdocrm.modules.catalog.domain.exception.ProductBarcodeNotFoundException;
+import com.savdocrm.modules.catalog.domain.exception.ProductNotFoundException;
 import com.savdocrm.modules.catalog.domain.exception.ProductVariantNotFoundException;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductBarcodeRepository;
+import com.savdocrm.modules.catalog.infrastructure.persistence.ProductRepository;
 import com.savdocrm.modules.catalog.infrastructure.persistence.ProductVariantRepository;
 import com.savdocrm.shared.multitenancy.TenantContextHolder;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +34,7 @@ public class ProductBarcodeService {
 
     private final ProductBarcodeRepository barcodeRepository;
     private final ProductVariantRepository variantRepository;
+    private final ProductRepository productRepository;
 
     @Transactional
     public ProductBarcodeDto addBarcode(UUID variantId, AddBarcodeCommand command) {
@@ -46,10 +51,12 @@ public class ProductBarcodeService {
         UUID tenantId = TenantContextHolder.getRequiredTenantId();
         Objects.requireNonNull(command, "AddBarcodeCommand cannot be null.");
 
+        UUID resolvedProductId = resolveAndLockActiveProduct(tenantId, expectedProductId, variantId);
+
         // Lock owning variant so primary-barcode transitions serialize safely
         ProductVariant variant = variantRepository.findByTenantIdAndIdWithLock(tenantId, variantId)
                 .orElseThrow(() -> new ProductVariantNotFoundException(variantId));
-        assertVariantBelongsToProduct(variant, expectedProductId);
+        assertVariantBelongsToProduct(variant, resolvedProductId);
 
         String normalized = CatalogValidation.normalizeBarcode(command.barcode());
         if (barcodeRepository.existsByTenantIdAndBarcode(tenantId, normalized)) {
@@ -98,9 +105,11 @@ public class ProductBarcodeService {
         ProductBarcode initial = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
+        UUID resolvedProductId = resolveAndLockActiveProduct(tenantId, expectedProductId, initial.getVariantId());
+
         ProductVariant variant = variantRepository.findByTenantIdAndIdWithLock(tenantId, initial.getVariantId())
                 .orElseThrow(() -> new ProductVariantNotFoundException(initial.getVariantId()));
-        assertOwnership(variant, expectedProductId, expectedVariantId, barcodeId);
+        assertOwnership(variant, resolvedProductId, expectedVariantId, barcodeId);
 
         // Re-load under owning variant lock to avoid acting on a stale pre-lock snapshot
         ProductBarcode barcode = barcodeRepository.findByTenantIdAndIdWithLock(tenantId, barcodeId)
@@ -147,9 +156,11 @@ public class ProductBarcodeService {
         ProductBarcode initial = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
+        UUID resolvedProductId = resolveAndLockActiveProduct(tenantId, expectedProductId, initial.getVariantId());
+
         ProductVariant variant = variantRepository.findByTenantIdAndIdWithLock(tenantId, initial.getVariantId())
                 .orElseThrow(() -> new ProductVariantNotFoundException(initial.getVariantId()));
-        assertOwnership(variant, expectedProductId, expectedVariantId, barcodeId);
+        assertOwnership(variant, resolvedProductId, expectedVariantId, barcodeId);
 
         // Re-load under owning variant lock to avoid stale pre-lock state
         ProductBarcode barcode = barcodeRepository.findByTenantIdAndIdWithLock(tenantId, barcodeId)
@@ -193,9 +204,11 @@ public class ProductBarcodeService {
         ProductBarcode initial = barcodeRepository.findByTenantIdAndId(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
 
+        UUID resolvedProductId = resolveAndLockActiveProduct(tenantId, expectedProductId, initial.getVariantId());
+
         ProductVariant variant = variantRepository.findByTenantIdAndIdWithLock(tenantId, initial.getVariantId())
                 .orElseThrow(() -> new ProductVariantNotFoundException(initial.getVariantId()));
-        assertOwnership(variant, expectedProductId, expectedVariantId, barcodeId);
+        assertOwnership(variant, resolvedProductId, expectedVariantId, barcodeId);
 
         ProductBarcode barcode = barcodeRepository.findByTenantIdAndIdWithLock(tenantId, barcodeId)
                 .orElseThrow(() -> new ProductBarcodeNotFoundException(barcodeId));
@@ -235,6 +248,22 @@ public class ProductBarcodeService {
                 .stream()
                 .map(ProductBarcodeDto::fromEntity)
                 .toList();
+    }
+
+    private UUID resolveAndLockActiveProduct(UUID tenantId, UUID expectedProductId, UUID variantId) {
+        final UUID resolvedProductId = expectedProductId != null
+                ? expectedProductId
+                : variantRepository.findByTenantIdAndId(tenantId, variantId)
+                        .orElseThrow(() -> new ProductVariantNotFoundException(variantId))
+                        .getProductId();
+        Product product = productRepository.findByTenantIdAndIdWithLock(tenantId, resolvedProductId)
+                .orElseThrow(() -> new ProductNotFoundException(resolvedProductId));
+        if (product.isArchived()) {
+            throw new InvalidProductConfigurationException(
+                    "Cannot mutate barcodes of an ARCHIVED product; restore the product first."
+            );
+        }
+        return resolvedProductId;
     }
 
     private void assertVariantBelongsToProduct(ProductVariant variant, UUID expectedProductId) {

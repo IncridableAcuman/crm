@@ -1,8 +1,8 @@
 # SAVDOCRM — Milestone 05: Catalog Frontend FSD Architecture
 
-- **Status**: Implemented & Verified (M05.5 — commit `e95d3d6eec283d862e5c3bc3dc89a77f97d3dcea`); M05.6 E2E Contract Audit Planned
-- **Version**: 1.1.0
-- **Implementation**: Milestone 05.5 (`74/74` Vitest tests & `tsc && vite build` passing; routes include `/catalog/products`, `/catalog/products/new`, `/catalog/products/:id`, `/catalog/products/:id/edit`, and `/catalog/categories`, with `useCatalogReadBranchScope` enforcing M05.4 `?branchId=` semantics)
+- **Status**: Implemented & Audited — Pass With Limitations (`M05.5` commit `e95d3d6eec283d862e5c3bc3dc89a77f97d3dcea`; `M05.6` audit completed)
+- **Version**: 1.2.0
+- **Implementation**: Milestone 05.5–05.6 (`76/76` Vitest tests & `tsc && vite build` passing; routes include `/catalog/products`, `/catalog/products/new`, `/catalog/products/:id`, `/catalog/products/:id/edit`, and `/catalog/categories`, with `useCatalogReadBranchScope` enforcing M05.4 `?branchId=` semantics and `catalogCacheIsolation.test.tsx` verifying in-flight tenant-switch & logout cache isolation; headless browser DOM E2E not tested due to host browser absence)
 - **FSD Stack**: React 19, TypeScript strict (`noUncheckedIndexedAccess`), Vite 6, Tailwind CSS, shadcn/ui, React Router, TanStack Query v5, React Hook Form + Zod, Axios.
 
 ---
