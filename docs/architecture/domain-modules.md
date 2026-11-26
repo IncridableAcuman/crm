@@ -14,7 +14,6 @@ classDiagram
     class TenancyModule {
         +TenantService
         +BranchService
-        +WarehouseService
     }
     class IdentityModule {
         +AuthenticationService
@@ -30,8 +29,9 @@ classDiagram
         +SupplierFacade
     }
     class InventoryModule {
-        +StockMovementService
-        +StockLevelQueryFacade
+        +WarehouseQueryFacade
+        +StockQueryFacade
+        +StockMovementFacade
         +StockReservationFacade
     }
     class PurchasesModule {
@@ -136,7 +136,7 @@ graph TD
 
 ### 3.3. Catalog Module (`com.savdocrm.modules.catalog`)
 * **Core Purpose**: Owns product identity, SKU/barcode identification, hierarchical categories, measurement unit definitions, and variant option structures across retail verticals. Explicitly does **not** own stock quantities, inventory valuation (WAC), tax regimes, sales orders, or financial transactions.
-* **Implementation Status**: M05.1–M05.6 Completed — Pass With Limitations (Architecture, Liquibase Schema, Domain Model, Repositories, Application Services, `ProductQueryFacade`, REST API/RBAC, React FSD Frontend & Integration/Security Audit in [m05-integration-security-quality-audit.md](../testing/m05-integration-security-quality-audit.md)); M06 Inventory not started.
+* **Implementation Status**: M05.1–M05.6 Completed — Pass With Limitations (Architecture, Liquibase Schema, Domain Model, Repositories, Application Services, `ProductQueryFacade`, REST API/RBAC, React FSD Frontend & Integration/Security Audit in [m05-integration-security-quality-audit.md](../testing/m05-integration-security-quality-audit.md)). M06 Inventory is designed and its database changesets (`v1.0.0/23`–`32`) exist; its Java domain code is not implemented.
 * **Entities & Tables**:
   - `ProductCategory` (`product_categories`): Self-referential Adjacency List (`parent_id`, bounded depth `0..4`, `ON DELETE RESTRICT`), with bounded cycle/depth enforcement in `ProductCategoryService`.
   - `UnitOfMeasure` (`units_of_measure`): Tenant-owned system-seeded (`PCS`, `KG`, `G`, `L`, `ML`, `M`, `BOX`, `PACK`) and custom units with `allow_decimal` and `decimal_precision` (`0..3`), seeded automatically on new tenant registration via `UnitOfMeasureService`.
@@ -146,11 +146,11 @@ graph TD
 * **Application Services & Public Contracts**:
   - `ProductCategoryService`, `UnitOfMeasureService`, `ProductService`, `ProductVariantService`, `ProductBarcodeService`.
   - `ProductQueryFacade` (`ProductQueryFacadeImpl`): Provides immutable DTO projections (`VariantCatalogDto`) to `Inventory`, `Sales`, and `Purchases` without exposing JPA entities or repositories.
-* **Architecture Docs**: [05-product-catalog.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-catalog.md), [05-product-database-design.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-database-design.md), [05-product-api-contracts.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-api-contracts.md), [05-product-frontend-architecture.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-frontend-architecture.md)
+* **Architecture Docs**: [05-product-catalog.md](./05-product-catalog.md), [05-product-database-design.md](./05-product-database-design.md), [05-product-api-contracts.md](./05-product-api-contracts.md), [05-product-frontend-architecture.md](./05-product-frontend-architecture.md)
 
 ---
 
-### 3.4. Inventory Module (`com.savdocrm.modules.inventory`) *(M06.1 Designed; Implementation M06.2+)*
+### 3.4. Inventory Module (`com.savdocrm.modules.inventory`) *(M06.1 Designed; schema changesets 23–32 landed; Java implementation M06.3+)*
 * **Core Purpose**: Owns warehouses, storage locations, immutable physical stock ledger, location/warehouse balance projections, stock documents, reservations, and Weighted Average Cost (`WAC`) valuation ([06-inventory-management.md](06-inventory-management.md)).
 * **Entities**:
   - `Warehouse` & `StockLocation`: Tenant holding facilities (branch-linked or unassigned central hubs) and flat bin/zone locations (`STORAGE`, `PICKING`, `RECEIVING_DOCK`, `DAMAGED`, `QUARANTINE`).

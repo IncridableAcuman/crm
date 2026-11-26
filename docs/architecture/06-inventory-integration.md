@@ -73,6 +73,7 @@ Executed synchronously **within the caller's ACID `@Transactional` boundary** (e
 - `StockMovementResultDto returnToSupplier(SupplierReturnCommand cmd)` — posts `PURCHASE_RETURN` outflow + revalues/adjusts WAC.
 - `SaleIssueResultDto issueForSale(SaleIssueCommand cmd)` — validates/consumes optional `reservationId`, locks `StockBalance`, posts `SALE_ISSUE` ledger, and returns `List<IssuedLineCostDto>` containing exact `unitCost` & `totalCost` (`COGS`) to `Sales`/`Finance`.
 - `StockMovementResultDto acceptSaleReturn(SaleReturnCommand cmd)` — posts `SALE_RETURN` to sellable or `DAMAGED` location using supplied original sale cost or current WAC.
+- `StockMovementResultDto returnFromTransferShortage(TransferShortageCommand cmd)` *(reserved for `M06.7`)* — records a destination shortage without creating phantom stock; kept internal until `Purchases`/`Sales` need it.
 
 ### 3.4 `StockReservationFacade`
 - `ReservationDto createReservation(CreateReservationCommand cmd)` — holds sellable stock with explicit `expiresAt` (`ACTIVE`).
@@ -98,13 +99,18 @@ Multi-tenant retail POS systems experience simultaneous checkouts, returns, tran
 
 Every multi-line inventory mutation service MUST sort requested keys in memory **before issuing any `SELECT ... FOR UPDATE`** and acquire locks in this exact hierarchy:
 
-1. **Pre-Validation Outside Locks**: Load and validate `ProductQueryFacade` variants and idempotency record (`IN_PROGRESS` lock/insert).
-2. **Balance Rows (`inventory_balances`)**: Ensure missing `(tenant_id, warehouse_id, location_id, variant_id)` zero rows are safely created (`INSERT ... ON CONFLICT DO NOTHING` before locking!), then lock all touched `inventory_balances` sorted strictly lexicographically by **`(warehouseId ASC, locationId ASC, variantId ASC)`**.
-3. **Warehouse Summary Rows (`inventory_warehouse_stocks`)**: Ensure missing rows exist (`INSERT ... ON CONFLICT DO NOTHING`), then lock all touched `inventory_warehouse_stocks` sorted strictly by **`(warehouseId ASC, variantId ASC)`**.
-4. **Valuation Rows (`inventory_costs`)**: Ensure missing rows exist, then lock all touched `inventory_costs` sorted strictly by **`(warehouseId ASC, variantId ASC)`**.
-5. **Reservation Rows (`inventory_reservations`)**: If consuming/releasing a reservation, lock `inventory_reservations` and its lines ordered by `(reservationId ASC, id ASC)` **before or strictly in documented order**—specifically: **operational document (`StockTransfer`/`InventoryReservation`/`StockCount`) FIRST (sorted by `id ASC`), THEN `inventory_balances`, `inventory_warehouse_stocks`, `inventory_costs` in canonical order**.
+| Step | Lock target | Global ordering inside the step |
+|---|---|---|
+| 0 | Pre-validation (no locks) | Resolve `ProductQueryFacade` variants and UOM precision; validate document state and payload shape. The `idempotency_records` row is inserted here, **before** any inventory lock. |
+| 1 | **Operational document header** (the one document being transitioned: `stock_receipts`, `stock_counts`, `stock_adjustments`, `stock_transfers`, or `inventory_reservations`) | Always exactly one row by `id`; its lines are loaded within the same aggregate and are not locked independently. |
+| 2 | **`inventory_balances`** | All touched keys sorted **`(warehouseId ASC, locationId ASC, variantId ASC)`**. Missing rows are created first with `INSERT ... ON CONFLICT DO NOTHING`. |
+| 3 | **`inventory_warehouse_stocks`** | All touched keys sorted **`(warehouseId ASC, variantId ASC)`**, including the destination warehouse of a transfer. |
+| 4 | **`inventory_costs`** | All touched keys sorted **`(warehouseId ASC, variantId ASC)`**. |
+| 5 | Reservation line rows (only when consuming/releasing) | Sorted by `(reservationId ASC, id ASC)`. A single reservation is already locked in step 1; this step covers multi-reservation consumption. |
 
-> **Zero Deadlock Guarantee**: Because `Transfer` dispatch locks source `inventory_balances` then `(sourceWh, destWh)` summaries/costs sorted by `warehouseId ASC`, two opposing transfers (`WH1 -> WH2` and `WH2 -> WH1` touching the same SKU) ALWAYS lock the lower `warehouseId` first and never form a wait-for cycle!
+> **Reconciliation with `Sales`/`Purchases`**: the caller (orchestrator) must not hold any inventory row lock when it starts. Inventory acquires its own document → balance → summary → cost locks in this order and returns; the orchestrator then continues with `Finance`. Mixed lock order between modules is forbidden because it would reintroduce cycles.
+
+> **Zero Deadlock Guarantee**: Two opposing transfers (`WH1 -> WH2` and `WH2 -> WH1` for the same SKU) each lock their own document header first (distinct rows), then lock balances by `(warehouseId, locationId, variantId)` and summaries/costs by `(warehouseId, variantId)`. Because both transactions order **all** warehouse keys ascending, the transaction touching the lower warehouse id first acquires that row first; the other waits. No wait-for cycle can form, regardless of business direction.
 
 ### 4.3 `INSERT ... ON CONFLICT DO NOTHING` Initialization Pattern
 When receiving a new SKU into a location or warehouse for the first time under concurrent requests, two transactions could both see no balance row and collide on `UNIQUE (tenant_id, warehouse_id, location_id, variant_id)`. M06 solves this via an idempotent native upsert (`ensureRowExists`) scoped by `tenantId`, followed immediately by `SELECT ... FOR UPDATE`.

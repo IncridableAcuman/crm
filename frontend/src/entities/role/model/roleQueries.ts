@@ -170,3 +170,67 @@ export function useRevokeRoleAssignment() {
     },
   });
 }
+
+export function useMemberRoles(membershipId: string, options?: { enabled?: boolean }) {
+  const activeTenant = useAuthStore((s) => s.activeTenant);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  return useQuery({
+    queryKey: roleKeys.memberRoles(activeTenant?.tenantId, membershipId),
+    queryFn: () => roleApi.getMemberRoles(membershipId),
+    enabled: isAuthenticated && !!activeTenant && !!membershipId && (options?.enabled ?? true),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useAssignRoleToMember() {
+  const queryClient = useQueryClient();
+  const activeTenant = useAuthStore((s) => s.activeTenant);
+
+  return useMutation({
+    mutationFn: ({
+      membershipId,
+      data,
+    }: {
+      membershipId: string;
+      data: Omit<CreateRoleAssignmentRequest, 'membershipId'>;
+    }) => roleApi.assignRoleToMember(membershipId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: roleKeys.assignments(activeTenant?.tenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: roleKeys.memberRoles(activeTenant?.tenantId, variables.membershipId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: permissionKeys.mine(activeTenant?.tenantId),
+      });
+    },
+  });
+}
+
+export function useRevokeMemberRole() {
+  const queryClient = useQueryClient();
+  const activeTenant = useAuthStore((s) => s.activeTenant);
+
+  return useMutation({
+    mutationFn: ({
+      membershipId,
+      assignmentId,
+    }: {
+      membershipId: string;
+      assignmentId: string;
+    }) => roleApi.revokeMemberRole(membershipId, assignmentId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: roleKeys.assignments(activeTenant?.tenantId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: roleKeys.memberRoles(activeTenant?.tenantId, variables.membershipId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: permissionKeys.mine(activeTenant?.tenantId),
+      });
+    },
+  });
+}

@@ -1,8 +1,9 @@
 # M06 — Inventory Management: Architecture & Domain Design
 
-> **Status**: Architecture Specification (M06.1 — Design Only; Not Yet Implemented)  
-> **Module**: `com.savdocrm.modules.inventory`  
-> **Bounded Context**: Inventory Management (Warehouses, Stock Locations, Dual-Entry Stock Ledger, Stock Balances, Receiving, Counting, Adjustments, Inter-Warehouse Transfers, Reservations, and WAC Costing)
+> **Status**: Architecture Specification (M06.1 — Design Only; domain code not yet implemented)
+> **Module**: `com.savdocrm.modules.inventory`
+> **Bounded Context**: Inventory Management (Warehouses, Stock Locations, Append-Only Stock Ledger, Stock Balances, Receiving, Counting, Adjustments, Inter-Warehouse Transfers, Reservations, and WAC Costing)
+> **Repository Note (verified)**: The logical schema described in [06-inventory-database-design.md](06-inventory-database-design.md) is already present in the repository as Liquibase changesets `v1.0.0/23`–`v1.0.0/32` with Testcontainers coverage. **No Inventory Java domain, persistence, service, or web code exists yet**; `RoleScopeType` still exposes only `TENANT`/`BRANCH`. See [m06.1-architecture-review.md](../testing/m06.1-architecture-review.md) §3 for the reconciliation.
 
 ---
 
@@ -30,6 +31,26 @@ The **Inventory** module is the authoritative system of record inside SAVDOCRM f
 | Suppliers and Customers | `parties` | Inventory does not model supplier or customer master data. |
 | General Ledger, Cashboxes, Payables, Receivables | `finance` | Inventory computes physical stock `unit_cost` (`WAC`) and emits valuation snapshots to callers/events; `finance` owns accounting journals. |
 | System Roles & RBAC Enforcement | `identity` | `identity` enforces `TENANT`, `BRANCH`, and `WAREHOUSE` RBAC scopes (`ADR-0016`). |
+
+---
+
+### 1.3 Aggregate Boundary Summary
+
+| Aggregate Root | Child Entities / Value Objects | Transactional Boundary | Owns |
+|---|---|---|---|
+| `Warehouse` (`warehouses`) | default `StockLocation` created atomically on creation (separate aggregate root) | Warehouse lifecycle only | Identity, type, branch link, default flag, lifecycle state |
+| `StockLocation` (`stock_locations`) | `LocationType`, locator fields | Location lifecycle only | Bin identity and stock pool classification |
+| `InventoryTransaction` (`inventory_transactions`) | `InventoryTransactionLine` | One ledger posting = one header + N lines, inserted atomically | Immutable movement facts and per-line cost/WAC snapshots |
+| `StockBalance` (`inventory_balances`) | none | Mutated only inside a ledger posting or reservation mutation | Current location-level physical and reserved quantity |
+| `WarehouseStockSummary` (`inventory_warehouse_stocks`) | none | Same transaction as `StockBalance` | Warehouse-wide derived pool quantities and in-transit |
+| `InventoryCost` (`inventory_costs`) | none | Same transaction as the posting that changed quantity | Warehouse-variant WAC and valuation |
+| `StockReceipt` (`stock_receipts`) | `StockReceiptLine` | Document lifecycle; posting fans out to ledger + balances + cost | Intake document state and provenance |
+| `StockCount` (`stock_counts`) | `StockCountLine` | Count lifecycle; approval delegates to `StockAdjustment` | Snapshot, counted quantities, variance decision |
+| `StockAdjustment` (`stock_adjustments`) | `StockAdjustmentLine` | Approval/posting boundary | Adjustment intent, maker-checker state, reason |
+| `StockTransfer` (`stock_transfers`) | `StockTransferLine` | Dispatch and each receipt are separate atomic transactions | Two-warehouse shipment state, in-transit reconciliation |
+| `InventoryReservation` (`inventory_reservations`) | `InventoryReservationLine` | Reservation lifecycle; consumption joins the `SALE_ISSUE` posting | Soft holds, consumed/released allocation |
+
+**Cross-aggregate rule**: aggregates reference each other by `id` + `tenant_id` only. A single application-service transaction may span several aggregates (for example posting fans out to ledger, balance, summary, and cost), but it must enter through the owning application service and must respect the canonical lock order documented in [06-inventory-integration.md](06-inventory-integration.md) §4.2.
 
 ---
 
@@ -120,7 +141,8 @@ Represents a concrete sub-warehouse storage bin/zone without deep recursive tree
 The ledger is strictly **append-only**. Posted `InventoryTransaction` and `InventoryTransactionLine` rows are **never updated or deleted** (`ON DELETE RESTRICT` across all FKs). Corrections require an offsetting compensating transaction linking `reversed_transaction_id`.
 
 #### `InventoryTransaction` (Aggregate Root — `inventory_transactions`)
-- `id`, `tenantId`, `createdAt`, `createdBy` (immutable append-only audit fields; `version = 0`)
+- `id`, `tenantId`, `createdAt`, `postedBy` (immutable append-only fields; there is no `updated_at`/`version` on the ledger header)
+- **Posting semantics**: there is no `DRAFT` ledger row. A ledger header is inserted already posted, inside the same transaction that mutated the balances. `InventoryPostingStatus` therefore has exactly one persisted value, `POSTED`; `DRAFT`/`PENDING` are states of the *operational document* (`StockReceipt`, `StockCount`, `StockAdjustment`, `StockTransfer`), never of the ledger. See §3.2.1 for the rejected alternatives.
 - `transactionNumber`: unique per tenant (`INV-TXN-YYYYMMDD-NNNNNN`)
 - `movementType`: `InventoryMovementType`
 - `warehouseId`: primary warehouse of this ledger entry (note: transfers emit two distinct transactions — `TRANSFER_OUT` at source warehouse and `TRANSFER_IN` at destination warehouse — correlated by `reference_id = transfer.id`)
@@ -142,6 +164,20 @@ The ledger is strictly **append-only**. Posted `InventoryTransaction` and `Inven
 - `totalCost` (`NUMERIC(18,4)` — signed cost impact `ROUND(quantityDelta * unitCost, 4)`)
 - `wacBefore` (`NUMERIC(15,4)`) & `wacAfter` (`NUMERIC(15,4)`) — warehouse-variant WAC snapshot at posting time
 
+#### 3.2.1 `InventoryPostingStatus` Decision
+
+| Alternative | Evaluation | Verdict |
+|---|---|---|
+| Persist `DRAFT` ledger rows and later flip to `POSTED` | Requires update/delete on ledger tables, breaks append-only immutability, and lets unposted rows be mistaken for stock facts during reconciliation | **Rejected** |
+| Asynchronous posting worker (`PENDING` → `POSTED`) | Introduces a window where a document claims to be posted but stock is not yet reserved/deducted; requires outbox, retries, and compensating logic disproportionate to a modular monolith | **Rejected for M06** |
+| Insert ledger rows only when the whole domain transaction succeeds | Atomicity is provided by the ACID transaction; immutable rows are facts by construction; replay is prevented by idempotency keys + unique references | **Selected** |
+
+**Consequence**: `InventoryPostingStatus` stays an internal domain concept with a single value (`POSTED`). No `posting_status` column is needed, and any future asynchronous posting must introduce a separate outbox table rather than mutating ledger rows.
+
+#### `InventoryReference` (Value Object)
+
+Every ledger header carries a mandatory, stable business source: `referenceType` (`InventoryReferenceType`) + `referenceId` (`UUID`). The pair is immutable and indexed (`(tenant_id, reference_type, reference_id)`). Internal documents use their own aggregate id (`STOCK_RECEIPT`, `STOCK_TRANSFER`, `STOCK_COUNT`, `STOCK_ADJUSTMENT`, `INTERNAL_MOVE`); upstream modules use their document id (`PURCHASE_ORDER`, `SALES_ORDER`, `SALES_RETURN`, `PURCHASE_RETURN`). `REVERSAL` and `OPENING_BALANCE` are the only self-contained references. A movement without a resolvable reference is a defect, not a valid state.
+
 #### Canonical `InventoryMovementType` Semantics Matrix
 
 | Movement Type | Direction (`quantityDelta`) | Physical (`on_hand`) Effect | Available Effect | Reserved Effect | In-Transit Effect (Dest WH) | Damaged / Quarantined Effect | WAC Effect | External Reference | Reversible via Compensating Entry? |
@@ -154,17 +190,63 @@ The ledger is strictly **append-only**. Posted `InventoryTransaction` and `Inven
 | `ADJUSTMENT_IN` | `+` | `+qty` | `+qty` (if sellable loc) | `0` | `0` | `+qty` if non-sellable loc | Preserves WAC if `unitCost` omitted; recalculates WAC if explicit positive `unitCost` supplied | `STOCK_ADJUSTMENT` / `STOCK_COUNT` | Yes (`ADJUSTMENT_OUT` or `REVERSAL`) |
 | `ADJUSTMENT_OUT` | `-` | `-qty` | `-qty` (if sellable loc) | `0` | `0` | `-qty` if non-sellable loc | Preserves WAC (`totalValue -= qty * currentWac`) | `STOCK_ADJUSTMENT` / `STOCK_COUNT` | Yes (`ADJUSTMENT_IN` or `REVERSAL`) |
 | `WRITE_OFF` | `-` | `-qty` | `-qty` (if sellable) | `0` | `0` | `-qty` (typically from `DAMAGED`/`QUARANTINE`) | Preserves WAC (`totalValue -= qty * currentWac`) | `STOCK_ADJUSTMENT` | Yes (`REVERSAL` prior to period close) |
-| `TRANSFER_OUT` | `-` | `-qty` (source WH) | `-qty` (source WH) | `0` (requires unreserved source stock) | `+qty` (destination WH) | `0` | Preserves source WAC; snapshots `dispatchUnitCost` onto transfer line | `STOCK_TRANSFER` | No direct edit once dispatched; short/return handled via transfer receipt/variance or return transfer |
-| `TRANSFER_IN` | `+` | `+qty` (dest WH) | `+qty` (if dest loc sellable) | `0` | `-dispatchedResolvedQty` (dest WH) | `+qty` (if received directly to `DAMAGED`) | **Recalculates dest WAC** blending dest stock with `dispatchUnitCost` | `STOCK_TRANSFER` | Yes via return transfer / adjustment |
+| `TRANSFER_OUT` | `-` | `-qty` (source WH) | `-qty` (source WH) | `0` (requires unreserved source stock) | `+qty` (destination WH) | `0` | Preserves source WAC; snapshots `unitCostSnapshot` onto transfer line | `STOCK_TRANSFER` | No direct edit once dispatched; short/return handled via transfer receipt/variance or return transfer |
+| `TRANSFER_IN` | `+` | `+qty` (dest WH) | `+qty` (if dest loc sellable) | `0` | `-dispatchedResolvedQty` (dest WH) | `+qty` (if received directly to `DAMAGED`) | **Recalculates dest WAC** blending dest stock with `unitCostSnapshot` | `STOCK_TRANSFER` | Yes via return transfer / adjustment |
 | `INTERNAL_MOVE_OUT` | `-` | `-qty` (source loc) | `-qty` if leaving sellable loc | `0` (cannot move reserved qty) | `0` | `-qty` if leaving `DAMAGED`/`QUARANTINE` | Preserves warehouse WAC (`totalValue` unchanged) | `INTERNAL_MOVE` (putaway / quarantine / damage seg.) | Yes (reverse `INTERNAL_MOVE`) |
 | `INTERNAL_MOVE_IN` | `+` | `+qty` (dest loc) | `+qty` if entering sellable loc | `0` | `0` | `+qty` if entering `DAMAGED`/`QUARANTINE` | Preserves warehouse WAC (`totalValue` unchanged) | `INTERNAL_MOVE` | Yes (reverse `INTERNAL_MOVE`) |
 | `REVERSAL` | `+/-` (negation of target) | Negates target lines | Negates target impact | `0` (reservations are not auto-recreated unless specified) | Negates if unreceived transfer | Negates target impact | Restores/recalculates WAC consistently | `REVERSAL` referencing `reversedTransactionId` | Compensating only (cannot reverse a `REVERSAL` blindly without chain audit) |
 
 > **Critical Reservation Rule**: Creating, updating, expiring, or releasing an `InventoryReservation` **does NOT** emit `InventoryTransaction` rows because physical stock has not moved. Only physical fulfillment (`SALE_ISSUE`) emits a ledger transaction while atomically decrementing `quantity_reserved`.
 
+#### 3.2.2 Why `RESERVATION*` Are Not Movement Types
+
+The candidate list contained `RESERVATION`, `RESERVATION_RELEASE`, and `RESERVATION_CONSUMPTION`. They are **deliberately excluded** from `InventoryMovementType`:
+
+1. **Ledger parity breaks.** `inventory_transaction_lines.quantity_delta` must reconstruct `quantity_on_hand` for every `(warehouse, location, variant)`. A reservation changes no physical quantity, so a zero-delta ledger line would violate `CHECK (quantity_delta <> 0)` and force a special case in every reconciliation query.
+2. **Two sources of truth for reserved stock.** Reserved quantity is derived from `inventory_reservation_lines` (`reserved - consumed - released`). Duplicating it in the ledger would create a second, divergent state that the reconciliation job cannot arbitrate.
+3. **Consumption is not a separate fact.** When an order ships, one physical fact occurs (`SALE_ISSUE`), which simultaneously decrements `on_hand` and `reserved`. Splitting it into `RESERVATION_CONSUMPTION` + `SALE_ISSUE` would double-count the outflow.
+4. **Reservation audit still exists.** Reservation lifecycle is fully auditable through `inventory_reservations` / `inventory_reservation_lines` (status, timestamps, actors, source reference). Audit trail does not require ledger rows.
+
+Similarly, `CUSTOMER_RETURN`/`SUPPLIER_RETURN` from the candidate list are named `SALE_RETURN`/`PURCHASE_RETURN` to match the owning document vocabulary, and generic `STOCK_ADJUSTMENT_IN/OUT` are named `ADJUSTMENT_IN`/`ADJUSTMENT_OUT` to keep the `ADJUSTMENT_*` prefix unique across modules.
+
 ---
 
 ### 3.3 Materialized Stock Balances (`StockBalance` & `WarehouseStockSummary`)
+
+#### 3.3.1 Canonical Quantity Definitions
+
+| Quantity | Definition | Where Stored | Never Negative |
+|---|---|---|---|
+| **Physical stock** (`on_hand`) | Units physically present in a location, regardless of pool | `inventory_balances.quantity_on_hand`; rolled up to `inventory_warehouse_stocks.quantity_on_hand` | Yes |
+| **Sellable stock** | `on_hand` held in `STORAGE` or `PICKING` locations | `inventory_warehouse_stocks.quantity_sellable` | Yes |
+| **Reserved stock** | Sum of `reserved_quantity - consumed_quantity - released_quantity` over `ACTIVE`/`PARTIALLY_CONSUMED` reservation lines in sellable locations | `inventory_balances.quantity_reserved`; rolled up to `inventory_warehouse_stocks.quantity_reserved` | Yes, and `<= on_hand` per sellable location |
+| **Available stock** | `quantity_sellable - quantity_reserved` (the only quantity sales/POS may promise) | Generated column `inventory_warehouse_stocks.quantity_available`; computed per location | Yes, by construction |
+| **In-transit stock** | Dispatched units not yet received at the destination warehouse (`dispatched - received_good - received_damaged - shortage`) | `inventory_warehouse_stocks.quantity_in_transit` on the **destination** warehouse only | Yes |
+| **Damaged stock** | `on_hand` in `DAMAGED` locations | `inventory_warehouse_stocks.quantity_damaged` | Yes |
+| **Quarantined stock** | `on_hand` in `QUARANTINE` locations | `inventory_warehouse_stocks.quantity_quarantined` | Yes |
+| **Staging stock** | `on_hand` in `RECEIVING_DOCK` locations, physically received but not yet put away | `inventory_warehouse_stocks.quantity_staging` | Yes |
+
+**Arithmetic invariants** (enforced by `CHECK` constraints in [06-inventory-database-design.md](06-inventory-database-design.md) and re-verified by the reconciliation service):
+
+```text
+warehouse.on_hand        = warehouse.sellable + warehouse.staging + warehouse.damaged + warehouse.quarantined
+warehouse.available      = warehouse.sellable - warehouse.reserved
+warehouse.reserved       <= warehouse.sellable
+location.reserved        <= location.on_hand                         (sellable locations only)
+location.reserved        =  0                                        (non-sellable locations)
+sum(location.on_hand)    = warehouse.on_hand                          per (warehouse, variant)
+in_transit(WH_dest)      = sum(open transfer lines dispatched to WH_dest) remaining quantity
+```
+
+`in_transit` is intentionally **excluded** from `on_hand` and from `available`: goods in a truck are not physically in either warehouse, and the source warehouse has already given them up at dispatch.
+
+#### 3.3.2 Quantity Precision, Negative Stock and Reconciliation
+
+- **Precision**: all quantities are `NUMERIC(12,3)` / Java `BigDecimal` with scale 3; floating point is forbidden (`ADR-004`). Scale is validated against the referenced UOM before posting (integer-only units reject fractional input).
+- **Negative stock**: disabled by default (`warehouses.allow_negative_stock = false`). Every outflow path re-checks `on_hand - reserved >= qty` while holding the balance row lock; database `CHECK` constraints are the last line of defense. The column exists so a future tenant policy flag can relax the *service* check without a migration, but the M06 implementation must reject any non-false value.
+- **Concurrency**: balance rows use `@Version` optimistic locking plus `SELECT ... FOR UPDATE` during posting. The pessimistic lock is the primary guard; the version column protects stale HTTP updates to documents, not stock.
+- **Reconciliation**: `inventory_balances` and `inventory_warehouse_stocks` are rebuildable projections. The verification query sums ledger deltas per location, reservation remainders per location, and open transfer remainders per destination warehouse, then compares against both projections and reports drift by key. Rebuild is an administrative, tenant-scoped operation and is never performed inside a normal request.
+- **Duplicate events**: replay protection is dual — `Idempotency-Key` for the HTTP command, and unique `(tenant_id, reference_type, reference_id, movement_type)` semantics enforced by the posting service for document-driven movements (one receipt posts once, one transfer dispatches once). The ledger's unique `transaction_number` and single-reversal partial index cover the remaining cases.
 
 To achieve both **location-level accuracy** and **O(1) POS/warehouse availability lookups**, Inventory maintains two synchronized materialized projections inside the same ACID posting transaction (`ADR-0013`):
 

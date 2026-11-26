@@ -7,6 +7,7 @@ import { useAuthStore } from '@/features/auth/model/useAuthStore';
 import { useCurrentUser } from '@/features/auth/model/authQueries';
 import { useBranches } from '@/entities/branch';
 import { useRoles, useRoleAssignments } from '@/entities/role';
+import { useSystemHealth } from '@/entities/system';
 import {
   useMyPermissions,
   useHasPermission,
@@ -64,6 +65,13 @@ export const HomePage: React.FC = () => {
     isLoading: assignmentsLoading,
     isError: assignmentsError,
   } = useRoleAssignments(undefined, { enabled: canReadRoles });
+
+  const {
+    data: systemHealth,
+    isLoading: healthLoading,
+    isError: healthError,
+    refetch: refetchHealth,
+  } = useSystemHealth();
 
   const activeBranchesCount = branches.filter((b) => b.isActive).length;
   const activeAssignmentsCount = assignments.filter((a) => a.isActive).length;
@@ -303,11 +311,58 @@ export const HomePage: React.FC = () => {
               <div className="flex items-center gap-3">
                 <Lock className="h-4 w-4 text-slate-400" />
                 <div>
+                  <div className="text-xs font-semibold text-slate-700">Stock & Inventory</div>
+                  <div className="text-[11px] text-slate-400">Warehouses, stock ledger, receipts & transfers</div>
+                </div>
+              </div>
+              <Badge variant="secondary" className="text-[10px] text-slate-500">Milestone 06</Badge>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50/50">
+              <div className="flex items-center gap-3">
+                <Lock className="h-4 w-4 text-slate-400" />
+                <div>
                   <div className="text-xs font-semibold text-slate-700">POS & Sales Engine</div>
                   <div className="text-[11px] text-slate-400">High-speed touch/scanner checkout & receipt print</div>
                 </div>
               </div>
-              <Badge variant="secondary" className="text-[10px] text-slate-500">Milestone 06</Badge>
+              <Badge variant="secondary" className="text-[10px] text-slate-500">Milestone 07</Badge>
+            </div>
+
+            {/* Live Backend Health Status (/api/v1/health) */}
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px]">
+              <div className="flex items-center gap-2 text-slate-600">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    healthLoading
+                      ? 'bg-slate-300 animate-pulse'
+                      : healthError || systemHealth?.status !== 'UP'
+                        ? 'bg-red-500'
+                        : 'bg-emerald-500'
+                  }`}
+                />
+                <span className="font-medium text-slate-800">
+                  {healthLoading
+                    ? 'Checking backend API...'
+                    : healthError
+                      ? 'Backend API unreachable'
+                      : `${systemHealth?.system ?? 'SAVDOCRM'} API ${systemHealth?.status ?? 'UP'}`}
+                </span>
+                {systemHealth?.version && (
+                  <span className="font-mono text-slate-400">v{systemHealth.version}</span>
+                )}
+              </div>
+              {healthError ? (
+                <button
+                  type="button"
+                  onClick={() => void refetchHealth()}
+                  className="font-medium text-slate-700 hover:text-slate-900 underline"
+                >
+                  Retry
+                </button>
+              ) : systemHealth?.framework ? (
+                <span className="text-slate-400">{systemHealth.framework}</span>
+              ) : null}
             </div>
           </CardContent>
         </Card>

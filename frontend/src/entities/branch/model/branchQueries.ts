@@ -22,14 +22,15 @@ export function useBranches(options?: { enabled?: boolean }) {
   });
 }
 
-export function useBranch(id: string) {
+export function useBranch(id: string, options?: { enabled?: boolean }) {
   const activeTenant = useAuthStore((s) => s.activeTenant);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   return useQuery({
     queryKey: branchKeys.detail(activeTenant?.tenantId, id),
     queryFn: () => branchApi.getBranchById(id),
-    enabled: isAuthenticated && !!activeTenant && !!id,
+    enabled: isAuthenticated && !!activeTenant && !!id && (options?.enabled ?? true),
+    staleTime: 60 * 1000,
   });
 }
 

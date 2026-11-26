@@ -1,8 +1,9 @@
 # M06 — Inventory Management: Logical Database Schema & Design
 
-> **Status**: Logical Schema Specification (M06.1 — Design Only; NO Liquibase XML written yet)  
-> **Target Engine**: PostgreSQL 16 (shared database, shared `public` schema, row-level `tenant_id` isolation)  
-> **Target Liquibase Sequence**: `v1.0.0/23` onwards (continuing after M05's `v1.0.0/22`)
+> **Status**: Logical Schema Specification (M06.1 — Design Only)
+> **Target Engine**: PostgreSQL 16 (shared database, shared `public` schema, row-level `tenant_id` isolation)
+> **Liquibase Sequence**: `v1.0.0/23`–`v1.0.0/32`
+> **Repository Note (verified)**: These changesets **already exist** in `backend/src/main/resources/db/changelog/v1.0.0/` and are wired into `db.changelog-master.xml`, with `InventoryDatabaseMigrationIntegrationTest` asserting table presence, composite FKs, guard constraints, idempotency uniqueness, `WAREHOUSE` RBAC constraints, and the 53-permission seed. This document is the design contract those changesets implement; no Java persistence model exists yet.
 
 ---
 
@@ -157,7 +158,7 @@ erDiagram
 | `quantity_on_hand` | `NUMERIC(12,3)` | NO | `DEFAULT 0.000 CHECK (quantity_on_hand >= 0)` |
 | `quantity_reserved` | `NUMERIC(12,3)` | NO | `DEFAULT 0.000 CHECK (quantity_reserved >= 0 AND quantity_reserved <= quantity_on_hand)` |
 | `last_movement_at` | `TIMESTAMPTZ` | YES | |
-| *Audit + Lock* | | NO | `created_at, updated_at, version` |
+| *Audit + Lock* | | NO | `created_at, updated_at, created_by, updated_by, version` |
 
 **Constraints & Indexes**:
 - `CONSTRAINT uq_inv_balances_key UNIQUE (tenant_id, warehouse_id, location_id, variant_id)`
@@ -320,14 +321,24 @@ Updates planned for M06 Liquibase migration following creation of `warehouses`:
   - `(scope_type = 'TENANT' AND branch_id IS NULL AND warehouse_id IS NULL)`
   - `OR (scope_type = 'BRANCH' AND branch_id IS NOT NULL AND warehouse_id IS NULL)`
   - `OR (scope_type = 'WAREHOUSE' AND warehouse_id IS NOT NULL AND branch_id IS NULL)`
-- Add partial unique index `uq_assignments_active_warehouse ON user_role_assignments (tenant_id, user_id, role_id, warehouse_id) WHERE is_active = true AND scope_type = 'WAREHOUSE'`.
+- Add partial unique index `uq_assignments_active_warehouse ON user_role_assignments (tenant_id, membership_id, role_id, warehouse_id) WHERE is_active = true AND scope_type = 'WAREHOUSE'` (assignment is keyed by `membership_id`, matching the M04 schema, not by `user_id`).
+- Add reporting index `idx_assignments_tenant_wh_active ON user_role_assignments (tenant_id, warehouse_id, is_active) WHERE warehouse_id IS NOT NULL`.
+- Both are implemented in `v1.0.0/31-extend-rbac-warehouse-scope.xml`, including a rollback that restores the M04 two-scope constraints.
 
 > **Design Note**: Keeping `branch_id IS NULL` on `WAREHOUSE`-scoped assignments prevents dual-scope ambiguity when a warehouse belongs to a branch or changes administrative structure; the warehouse itself retains its optional `branch_id`.
 
 ---
 
-## 4. Schema Migration Verification Checklist (For M06.2)
+## 4. Verification Status and Remaining Checks
 
-1. Verify `(tenant_id, id)` unique constraint presence on `branches` and `product_variants` prior to creating composite FKs (add idempotent `UNIQUE` constraint only if absent).
-2. Execute Liquibase migrations on clean PostgreSQL 16 AND on a database pre-populated with M01–M05 seed/integration data (tenants, users, custom roles, system roles).
-3. Verify RBAC scope migration leaves existing `TENANT` and `BRANCH` assignments untouched and valid under updated `CHECK` constraints.
+Already verified by `InventoryDatabaseMigrationIntegrationTest` (Testcontainers PostgreSQL 16):
+
+1. All 18 M06 tables exist and changesets `v1.0.0-23` through `v1.0.0-32` are recorded once.
+2. Single-default-per-branch warehouse index, `is_default_for_branch ⇒ branch_id IS NOT NULL`, cross-tenant branch rejection, and non-`STORAGE` default-location rejection.
+3. Generated `quantity_available`, bucket-sum check, `reserved <= on_hand`, cross-tenant variant FK rejection, double-reversal rejection, `quantity_after` arithmetic, self-transfer rejection, transfer receipt over-quantity rejection.
+4. Idempotency uniqueness per `(tenant_id, key, endpoint)`, `WAREHOUSE` scope acceptance/mixed-scope rejection/cross-tenant warehouse rejection, `RESTRICT` protection of referenced warehouses, and 23 inventory permissions / 53 total.
+
+Still outstanding for the implementation milestones:
+
+1. Confirm the migrations apply on a database pre-populated with real M04/M05 tenant data (not only the empty Testcontainers database), especially `v1.0.0/31` constraint replacement.
+2. No trigger currently blocks `UPDATE`/`DELETE` on ledger tables; append-only is an application-layer invariant to be enforced in `M06.4` (repository shape + ArchUnit/application tests) and optionally by DB privileges in production hardening.

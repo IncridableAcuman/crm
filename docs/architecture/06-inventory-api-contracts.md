@@ -1,7 +1,7 @@
 # M06 — Inventory Management: REST API Contracts
 
-> **Status**: REST Contract Specification (M06.1 — Design Only; Not Yet Implemented)  
-> **Base Path**: `/api/v1/inventory`  
+> **Status**: REST Contract Specification (M06.1 — Design Only; endpoints not implemented)
+> **Base Path**: `/api/v1/inventory`
 > **Contract Alignment**: Strictly matches implemented M04/M05 response wrappers (`ApiResponse<T>`, `PageResponse<T>`) and RFC 7807 `ProblemDetail` (`GlobalExceptionHandler`), superseding legacy `api-conventions.md` examples (`ADR-0016`).
 
 ---
@@ -10,7 +10,7 @@
 
 ### 1.1 Authentication, Tenant & Correlation Headers
 - `Authorization: Bearer <jwt>` (required)
-- `X-Tenant-Id: <uuid>` (required tenant context header, validated against authenticated `TenantMembership`)
+- **Tenant context is never accepted from the client.** There is no `X-Tenant-Id` header: the tenant is resolved from the tenant-scoped JWT and verified against the live `TenantMembership` by `JwtAuthenticationFilter` (M03, `ADR-010`), then exposed through `TenantContextHolder`. A body/query `tenantId` field is ignored and never authoritative.
 - `Idempotency-Key: <string>` (up to 128 chars; **required** on all ledger-posting, stock-mutating, transfer-transition, and reservation-mutating `POST`/`PUT` endpoints listed below)
 - `X-Correlation-Id` (optional trace header propagated into logs and ledger context)
 
@@ -164,7 +164,39 @@ Validation failures (`400 Bad Request`) include `"errors": { "field": "message" 
 
 ---
 
-## 3. Sample Key Request / Response Contracts
+## 3. Request / Response DTO Catalog
+
+DTOs are web-layer records in `com.savdocrm.modules.inventory.web.dto`; they never expose JPA entities and never accept `tenantId`.
+
+| DTO | Direction | Key Fields | Validation |
+|---|---|---|---|
+| `CreateWarehouseRequest` | in | `code` (`^[A-Z0-9_-]{2,32}$`), `name` (≤120), `warehouseType`, `branchId` (nullable), `isDefaultForBranch`, `address`, `phone`, `notes` | `code`/`name` required; `isDefaultForBranch` requires `branchId` |
+| `UpdateWarehouseRequest` | in | `name`, `branchId`, `isDefaultForBranch`, `address`, `phone`, `notes`, `version` | `version` required (optimistic lock) |
+| `WarehouseResponse` | out | `id`, `code`, `name`, `warehouseType`, `branchId`, `branchName`, `isDefaultForBranch`, `status`, `allowNegativeStock`, `locationCount`, `createdAt`, `updatedAt`, `version` | — |
+| `CreateStockLocationRequest` | in | `code`, `name`, `locationType`, `isDefault`, `zone`, `aisle`, `rack`, `bin` | `code` unique per warehouse; `isDefault` requires `STORAGE` |
+| `StockLocationResponse` | out | `id`, `warehouseId`, `code`, `name`, `locationType`, `status`, `isDefault`, locator fields, `version` | — |
+| `WarehouseStockResponse` | out | `warehouseId`, `variantId`, `sku`, `productName`, `quantityOnHand`, `quantitySellable`, `quantityReserved`, `quantityAvailable`, `quantityInTransit`, `quantityStaging`, `quantityDamaged`, `quantityQuarantined`, `reorderPoint`, `unitCost`*, `totalValue`* | `*` omitted unless caller holds `inventory.costs.read` |
+| `LocationStockResponse` | out | `warehouseId`, `locationId`, `locationCode`, `locationType`, `variantId`, `quantityOnHand`, `quantityReserved`, `quantityAvailable`, `lastMovementAt` | — |
+| `CreateReceiptRequest` | in | `warehouseId`, `sourceType`, `sourceReferenceId`, `receivedAt`, `notes`, `lines[]` | at least one line; no duplicate `(locationId, variantId)` pair |
+| `ReceiptLineRequest` | in | `variantId`, `locationId` (nullable → default), `quantity` (>0, UOM scale), `unitCost` (≥0) | quantity precision validated via `ProductQueryFacade` |
+| `StockReceiptResponse` | out | header fields, `status`, `ledgerTransactionId`, `lines[]`, `version` | lines immutable once `POSTED` |
+| `CreateStockCountRequest` | in | `warehouseId`, `countScope`, `locationIds[]`/`variantIds[]`, `notes` | partial scope requires at least one selector |
+| `RecordCountLinesRequest` | in | `version`, `lines[{countLineId, countedQuantity}]` | only while `IN_PROGRESS`; counted ≥ 0 and UOM-valid |
+| `StockCountResponse` | out | header fields, `status`, `snapshotAt`, `lines[{systemQuantitySnapshot, countedQuantity, varianceQuantity}]`, `generatedAdjustmentId`, `version` | — |
+| `CreateAdjustmentRequest` | in | `warehouseId`, `reason`, `notes`, `autoSubmit`, `lines[]` | `reason` from the enum; at least one line |
+| `AdjustmentLineRequest` | in | `locationId`, `variantId`, `adjustmentDirection`, `movementType`, `quantity` (>0), `unitCost` (required for `INCREASE`, forbidden otherwise) | `DECREASE`+`ADJUSTMENT_IN` rejected |
+| `StockAdjustmentResponse` | out | header fields, `status`, `submittedBy`, `approvedBy`, `approvedAt`, `ledgerTransactionId`, `lines[]`, `version` | — |
+| `CreateTransferRequest` | in | `sourceWarehouseId`, `destinationWarehouseId`, `notes`, `lines[]` | warehouses must differ and be `ACTIVE` |
+| `ReceiveTransferRequest` | in | `version`, `receivedAt`, `notes`, `lines[{transferLineId, destinationLocationId, damagedLocationId, receivedGoodQuantity, receivedDamagedQuantity, shortageQuantity, varianceReason}]` | per-line sum ≤ remaining in-transit; UOM-valid |
+| `StockTransferResponse` | out | header fields, `status`, warehouse summaries, `lines[{requested, dispatched, receivedGood, receivedDamaged, shortage, remainingInTransit}]`, `version` | — |
+| `CreateReservationRequest` | in | `warehouseId`, `sourceType`, `sourceReferenceId`, `expiresAt`, `lines[{locationId?, variantId, quantity}]` | `sourceReferenceId` required and unique per source |
+| `ReservationResponse` | out | header fields, `status`, `expiresAt`, `lines[{reservedQuantity, consumedQuantity, releasedQuantity, remainingQuantity}]`, `version` | — |
+| `InventoryTransactionResponse` | out | `id`, `transactionNumber`, `warehouseId`, `movementType`, `referenceType`, `referenceId`, `reversedTransactionId`, `occurredAt`, `postedBy`, `lines[]` | cost fields gated by `inventory.costs.read` |
+| `ReverseTransactionRequest` | in | `reason` (required, 10–500 chars) | only reversible movement types |
+
+---
+
+## 4. Sample Key Request / Response Contracts
 
 ### 3.1 `POST /api/v1/inventory/receipts/{receiptId}/post` (or Direct Create+Post)
 
@@ -211,7 +243,7 @@ Validation failures (`400 Bad Request`) include `"errors": { "field": "message" 
 
 ---
 
-## 4. Standardized Error Code Matrix
+## 5. Standardized Error Code Matrix
 
 | HTTP Status | `errorCode` (`ProblemDetail`) | Trigger Condition |
 |---|---|---|

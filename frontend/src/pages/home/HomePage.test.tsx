@@ -7,6 +7,7 @@ import { useAuthStore } from '@/features/auth/model/useAuthStore';
 import * as authQueries from '@/features/auth/model/authQueries';
 import * as branchModule from '@/entities/branch';
 import * as roleModule from '@/entities/role';
+import * as systemModule from '@/entities/system';
 import * as permissionQueries from '@/entities/permission/model/permissionQueries';
 
 vi.mock('@/entities/permission/model/permissionQueries', async () => {
@@ -33,6 +34,11 @@ vi.mock('@/entities/branch', async () => {
 vi.mock('@/entities/role', async () => {
   const actual = await vi.importActual<typeof import('@/entities/role')>('@/entities/role');
   return { ...actual, useRoles: vi.fn(), useRoleAssignments: vi.fn() };
+});
+
+vi.mock('@/entities/system', async () => {
+  const actual = await vi.importActual<typeof import('@/entities/system')>('@/entities/system');
+  return { ...actual, useSystemHealth: vi.fn() };
 });
 
 describe('HomePage Dashboard Data Integrity', () => {
@@ -62,6 +68,18 @@ describe('HomePage Dashboard Data Integrity', () => {
       data: [],
       isLoading: false,
       isError: false,
+    } as never);
+    vi.mocked(systemModule.useSystemHealth).mockReturnValue({
+      data: {
+        status: 'UP',
+        system: 'SAVDOCRM',
+        version: '0.0.1-SNAPSHOT',
+        serverTime: '2026-11-26T08:00:00Z',
+        framework: 'Spring Boot 4.2.0 / Java 21',
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     } as never);
   });
 
@@ -119,5 +137,6 @@ describe('HomePage Dashboard Data Integrity', () => {
     expect(screen.getAllByText('Restricted')).toHaveLength(2);
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('sales.orders.create')).toBeInTheDocument();
+    expect(screen.getByText('SAVDOCRM API UP')).toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 # M06 — Inventory Management: Multi-Tenancy, RBAC & Security Architecture
 
 > **Status**: Security & Isolation Specification (M06.1 — Design Only)  
-> **Builds Upon**: [multi-tenancy.md](file:///home/izzatbek/Desktop/crm/docs/architecture/multi-tenancy.md), [04-rbac-and-authorization.md](file:///home/izzatbek/Desktop/crm/docs/architecture/04-rbac-and-authorization.md), and [ADR-0007](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md)
+> **Builds Upon**: [multi-tenancy.md](multi-tenancy.md), [04-rbac-and-authorization.md](04-rbac-and-authorization.md), and [ADR-0007](decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md)
 
 ---
 
@@ -11,7 +11,7 @@ Every Inventory query, mutation, cache entry, and background task enforces full 
 
 | Pillar | Inventory Enforcement Mechanism |
 |---|---|
-| 1. Context Establishment | `JwtAuthenticationFilter` + `TenantContextFilter` resolve `tenantId` exclusively from verified JWT/session membership (`X-Tenant-Id` validated against user's active `TenantMembership`), never from body/query parameters. |
+| 1. Context Establishment | `JwtAuthenticationFilter` resolves `tenantId` exclusively from the tenant-scoped JWT and re-verifies it against the live `TenantMembership` before binding `TenantContextHolder`. No client header (`X-Tenant-Id` does not exist in the codebase) and no body/query `tenantId` is ever consulted. |
 | 2. Repository Isolation | All Inventory Spring Data JPA repositories extend `TenantAwareRepository<T, UUID>` and accept explicit `tenantId` filters on every query, projection, and lock query (`@Lock(PESSIMISTIC_WRITE)`). |
 | 3. Composite Foreign Keys | Cross-table references inside PostgreSQL enforce `(tenant_id, target_id) -> target(tenant_id, id) ON DELETE RESTRICT`, making cross-tenant foreign keys impossible at SQL commit time. |
 | 4. Native Query Hygiene | Zero unscoped native SQL queries; any native query or bulk update (`ReservationExpirationJob` batch cleanup, reporting queries) enforces explicit `WHERE tenant_id = :tenantId`. |
@@ -63,7 +63,21 @@ Extend `PermissionAuthorizationService` (`modules/identity`) with warehouse-awar
 3. `boolean hasBranchStockReadPermission(UUID branchId, String permission)` *(POS / Catalog Bridge)*  
    - When `Sales`/POS or `Catalog` `?branchId=` queries stock availability for a branch's retail store warehouse, `BRANCH` roles holding `inventory.stock.read` (e.g., `CASHIER` / `MANAGER` at Branch `B`) may read stock availability for warehouses explicitly linked to `branch_id = B` (`Warehouse.branchId == B`). Write operations (`receipts`, `adjustments`, `counts`, `transfers`, `warehouses.manage`) **always** require `hasWarehousePermission` (`TENANT` or explicit `WAREHOUSE` assignment).
 
-### 2.4 Cross-Warehouse Operations (`StockTransfer`) Authorization
+### 2.4 Denied-Access Behaviour (Fail Closed)
+
+| Caller state | Warehouse-scoped read | Warehouse-scoped write |
+|---|---|---|
+| `TENANT` scope holding the permission, or `OWNER` | Allowed for every warehouse in the tenant | Allowed |
+| Explicit `WAREHOUSE(W)` assignment holding the permission | Allowed for `W` only; list endpoints silently filter to `W` | Allowed for `W` only |
+| `BRANCH(B)` assignment only | Allowed only on the POS/stock-read bridge for warehouses with `branch_id = B`; no ledger, receipt, count, adjustment, transfer, or warehouse-admin access | Denied (`403`) |
+| Authenticated but no inventory permission | `403` | `403` |
+| No active membership / suspended tenant | `401`/`403` from the M03 filter chain before Inventory is reached | Same |
+| Warehouse UUID belonging to another tenant | `404` (never `403`, to avoid confirming existence) | `404` |
+| Warehouse UUID in the same tenant but not assigned | `403` when explicitly requested; omitted from unfiltered list results | `403` |
+
+**Correction guard**: `getPermittedWarehouseIds(permission)` returning an empty set must not be interpreted as "no filter". List queries with an empty permitted set return an empty page with `200 OK` (or `403` when the caller explicitly requested an unauthorized `warehouseId`), never the full tenant result.
+
+### 2.5 Cross-Warehouse Operations (`StockTransfer`) Authorization
 
 A `StockTransfer` touches two warehouses (`sourceWarehouseId` and `destinationWarehouseId`):
 
@@ -78,6 +92,8 @@ A `StockTransfer` touches two warehouses (`sourceWarehouseId` and `destinationWa
 ---
 
 ## 3. Inventory Permission Catalog (`Permissions.java`)
+
+> **Migration status note (verified)**: `v1.0.0/32-seed-inventory-permissions.xml` already inserts the 20 new permission rows into the `permissions` table, but `com.savdocrm.modules.identity.domain.Permissions` still declares only 33 constants (3 inventory). Until `M06.3` adds the 20 constants to `ALL_PERMISSIONS`, `OWNER`'s dynamic bypass will not include them and no `@PreAuthorize` can reference them. The doc and seed must be kept in lockstep; the seed alone is not a working authorization change.
 
 Currently, `Permissions.java` defines 33 permissions, of which **3 are already present** for Inventory:
 - `inventory.stock.read`
@@ -111,6 +127,12 @@ All 3 existing codes are **preserved verbatim** to maintain backward compatibili
 | `inventory.transfers.cancel` | Transfers | New (M06) | Cancel pre-dispatch stock transfers |
 | `inventory.reservations.read` | Reservations | New (M06) | View stock holds and expiration status |
 | `inventory.reservations.manage` | Reservations | New (M06) | Create, release, or manually manage stock reservations |
+
+**Granularity rationale** (deviations from the candidate list in the milestone brief):
+
+- **`warehouses.read` + `warehouses.manage`** instead of separate `create`/`update`/`manage`: a half-permissioned user who may create a warehouse but not rename it has no real workflow; one management permission per resource keeps role administration tractable. `manage` is still tenant/house-scoped and separate from `read`.
+- **Document-scoped write permissions** (`receipts.post`, `counts.approve`, `adjustments.approve`, `transfers.dispatch`/`receive`) instead of generic `stock.receive`/`stock.issue`/`stock.adjust`: posting authority belongs to the business document that justifies the movement. `stock.read` remains the single read capability. Generic stock writes through an API would violate the no-arbitrary-mutation rule.
+- **`transfers.approve` is intentionally absent**: approval and dispatch are one atomic decision in this design (a separate approval without dispatch adds ceremony without control); `transfers.dispatch` covers both transitions. Revisit only if a two-person dispatch control is requested.
 
 ---
 

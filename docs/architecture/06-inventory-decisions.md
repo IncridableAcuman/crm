@@ -1,14 +1,16 @@
 # M06 — Inventory Management: Architecture Decision Records (ADRs)
 
-> **Status**: Architecture Decisions for M06.1 (Continuing from `ADR-0010` in [docs/architecture/decisions/](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/))  
+> **Status**: Architecture Decisions for M06.1 (Continuing from `ADR-0010` in [docs/architecture/decisions/](decisions/))
 > **Scope**: Architectural trade-offs, bounded-context boundaries, concurrency guarantees, and verified reconciliation of legacy documentation vs actual implemented codebase (`M01`–`M05.6`).
+>
+> **ADR numbering note**: `ADR-0011`–`ADR-0017` continue the module-ADR series `decisions/ADR-0005`–`ADR-0010` (authentication, RBAC, catalog). The older **`architecture-decisions.md`** file uses a separate legacy three-digit scheme (`ADR-001`–`ADR-016`) whose statements are historical; `ADR-011` there (Spring Boot 3.4.x) is **not** the same record as `ADR-0011` here (Warehouse placement). New module decisions always belong in this series.
 
 ---
 
 ## ADR-0011: Place `Warehouse` in `inventory` Module with Optional `Branch` Reference
 
 - **Status**: Proposed (M06.1)
-- **Context**: Legacy [domain-modules.md](file:///home/izzatbek/Desktop/crm/docs/architecture/domain-modules.md) §3.1 listed `Warehouse` under `Tenancy`, while actual `modules/tenancy` implemented only `Tenant` and `Branch` (`v1.0.0/01`–`02`), and [ADR-0007](file:///home/izzatbek/Desktop/crm/docs/architecture/decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md) explicitly deferred `WAREHOUSE` concepts until the Inventory module is built. Additionally, retail businesses often operate both branch-attached store warehouses and central hub warehouses (`branch_id = NULL`).
+- **Context**: Legacy [domain-modules.md](./domain-modules.md) §3.1 listed `Warehouse` under `Tenancy`, while actual `modules/tenancy` implemented only `Tenant` and `Branch` (`v1.0.0/01`–`02`), and [ADR-0007](decisions/ADR-0007-rbac-scope-and-concurrency-architecture.md) explicitly deferred `WAREHOUSE` concepts until the Inventory module is built. Additionally, retail businesses often operate both branch-attached store warehouses and central hub warehouses (`branch_id = NULL`).
 - **Options Considered**:
   1. *Put `Warehouse` in `tenancy`*: Creates circular or blurred boundaries because warehouse lifecycle deactivation guards depend directly on `StockBalance`, `StockTransfer`, and `StockReceipt`.
   2. *Require `branch_id NOT NULL` on every `Warehouse`*: Forces creation of fake "virtual branches" for central distribution hubs and breaks POS branch filtering.
@@ -35,7 +37,7 @@
 ## ADR-0013: Dual-Projection Balance Model (`StockBalance` + `WarehouseStockSummary`) with Immutable Header-Line Ledger
 
 - **Status**: Proposed (M06.1)
-- **Context**: Legacy [database-design.md](file:///home/izzatbek/Desktop/crm/docs/architecture/database-design.md) sketched a single `inventory_stocks(warehouse_id, variant_id)` projection and a flat `inventory_transactions` row without location granularity, in-transit counts, damage/quarantine buckets, or multi-line atomic documents. Summing `inventory_transaction_lines` on every POS checkout or catalog page load would degrade at scale, while maintaining only location rows would force `GROUP BY` scans on every warehouse availability check.
+- **Context**: Legacy [database-design.md](./database-design.md) sketched a single `inventory_stocks(warehouse_id, variant_id)` projection and a flat `inventory_transactions` row without location granularity, in-transit counts, damage/quarantine buckets, or multi-line atomic documents. Summing `inventory_transaction_lines` on every POS checkout or catalog page load would degrade at scale, while maintaining only location rows would force `GROUP BY` scans on every warehouse availability check.
 - **Decision**:
   1. Model the immutable ledger as header + line (`InventoryTransaction` + `InventoryTransactionLine`), strictly append-only (`ON DELETE RESTRICT`, compensating `REVERSAL` only).
   2. Maintain `StockBalance` (`inventory_balances`) keyed by `(tenant_id, warehouse_id, location_id, variant_id)` as the authoritative pessimistic-locking balance row.
@@ -81,8 +83,8 @@
 - **Status**: Proposed (M06.1)
 - **Context**: Auditing existing architecture docs against the live `M01`–`M05.6` codebase revealed concrete divergences that M06 must resolve consistently instead of copying stale specs:
   1. **RBAC (`RoleScopeType` & Permissions)**: Implemented `RoleScopeType` only has `TENANT` and `BRANCH` (`ADR-0007`), and `Permissions.java` currently has 33 permissions (including 3 placeholders: `inventory.stock.read`, `inventory.adjustments.create`, `inventory.transfers.create`). Existing M04 invariants forbid auto-mutating tenant custom roles during migrations (`04-rbac-and-authorization.md` §5.4).
-  2. **API Envelope & Error Format**: Implemented M04/M05 controllers return `ApiResponse<PageResponse<T>>` (`data.items`, `totalElements`, etc.), `200 OK` (`ApiResponse<Void>`) on deletes, and RFC 7807 `ProblemDetail` (`errors` map in `GlobalExceptionHandler`), **not** the legacy `pagination`/`error.details`/`204` shapes sketched in [api-conventions.md](file:///home/izzatbek/Desktop/crm/docs/architecture/api-conventions.md).
-  3. **Idempotency Persistence**: Documented in [database-design.md](file:///home/izzatbek/Desktop/crm/docs/architecture/database-design.md) §4.9 and [api-conventions.md](file:///home/izzatbek/Desktop/crm/docs/architecture/api-conventions.md), but `idempotency_records` does **not yet exist** in Liquibase `v1.0.0/00`–`22` or Java source.
+  2. **API Envelope & Error Format**: Implemented M04/M05 controllers return `ApiResponse<PageResponse<T>>` (`data.items`, `totalElements`, etc.), `200 OK` (`ApiResponse<Void>`) on deletes, and RFC 7807 `ProblemDetail` (`errors` map in `GlobalExceptionHandler`), **not** the legacy `pagination`/`error.details`/`204` shapes sketched in [api-conventions.md](./api-conventions.md).
+  3. **Idempotency Persistence**: Documented in [database-design.md](./database-design.md) §4.9 and [api-conventions.md](./api-conventions.md). At the start of M06.1 the table did not exist; it now exists as `v1.0.0/30-create-idempotency-records.xml` (see ADR-0017), still without a Java `IdempotencyService`.
   4. **Foreign Key Delete Policy**: Legacy `database-design.md` sketched `ON DELETE CASCADE` on tenant/catalog FKs, whereas M05 (`v1.0.0/22`) and M04 (`15-harden-rbac-foreign-keys.xml`) standardized strict `ON DELETE RESTRICT`.
   5. **Technology Baseline Drift**: Older docs (`backend-architecture.md`, `ADR-011`) mention Spring Boot `3.4.x` and Gradle `8.10.2`, whereas `build.gradle.kts` and `gradle-wrapper.properties` run **Spring Boot `4.2.0`** and **Gradle `9.9.1`** on Java 21.
 - **Decision**:
@@ -94,3 +96,20 @@
 - **Consequences**:
   - Zero runtime/contract surprises between M06 and M01–M05.
   - Legacy `api-conventions.md`, `backend-architecture.md`, and `database-design.md` drift is explicitly documented for cleanup without altering M05 code.
+
+---
+
+## ADR-0017: Reconciling Pre-Existing Inventory Schema Changesets (`v1.0.0/23`–`32`)
+
+- **Status**: Accepted (M06.1, documentation reconciliation)
+- **Context**: The M06.1 brief stated that Inventory had not been implemented and that no Liquibase migrations existed. Repository inspection at commit `69c3e78` proves otherwise: changesets `v1.0.0/23`–`v1.0.0/32` create every Inventory table, the shared `idempotency_records` table, the `WAREHOUSE` RBAC assignment column/constraints, and the 20 new `inventory.*` permission rows, are registered in `db.changelog-master.xml`, and are covered by `InventoryDatabaseMigrationIntegrationTest`. At the same time, no `com.savdocrm.modules.inventory` Java code exists, `RoleScopeType` still has only `TENANT`/`BRANCH`, and `Permissions` still declares 33 constants. The schema is therefore **ahead of the code**, and the previous review report incorrectly claimed zero migrations had been written.
+- **Options Considered**:
+  1. *Revert changesets 23–32 to restore a pure design-only baseline.* Rejected: they are committed, tested, and removing them is destructive and would invalidate the migration test suite; the user has not approved a revert.
+  2. *Ignore the discrepancy and document the schema as future work.* Rejected: it would make the contract factually wrong and mislead the implementation milestones.
+  3. *Accept the changesets as an already-landed `M06.2` schema slice and align every design document to them.* Selected.
+- **Decision**: Treat `M06.2` (database schema) as **partially delivered** by the existing changesets. Keep the changesets untouched in M06.1, verify the design documents against their actual columns/constraints, and record the code-side gap: `RoleScopeType.WAREHOUSE`, the 20 `Permissions` constants, `IdempotencyService`, and all domain/persistence/service/web code remain unimplemented and belong to `M06.3`–`M06.9`.
+- **Consequences**:
+  - The design contract and the live schema agree on table names, columns, composite FKs, `CHECK` constraints, and permission seeds.
+  - `M06.2` must not be re-planned as if from scratch; its remaining work is limited to deployment verification on a populated database and any corrections found during `M06.3`+.
+  - The permission seed exists in the database but is inert until `M06.3` adds the matching constants to `Permissions.ALL_PERMISSIONS` (OWNER bypass) and `SystemRoles` templates.
+  - Any future attempt to make this milestone design-only must start from a clean baseline commit, not by editing the current tree.

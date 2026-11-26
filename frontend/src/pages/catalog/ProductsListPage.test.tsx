@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ProductsListPage } from './ProductsListPage';
 import * as productModule from '@/entities/product';
 import * as categoryModule from '@/entities/category';
+import * as unitModule from '@/entities/unit';
 import * as branchModule from '@/entities/branch';
 import * as permissionQueries from '@/entities/permission/model/permissionQueries';
 
@@ -38,12 +39,18 @@ vi.mock('@/entities/product', async () => {
     useProducts: vi.fn(),
     useArchiveProduct: vi.fn(),
     useRestoreProduct: vi.fn(),
+    useDeleteDraftProduct: vi.fn(),
   };
 });
 
 vi.mock('@/entities/category', async () => {
   const actual = await vi.importActual<typeof import('@/entities/category')>('@/entities/category');
   return { ...actual, useCategories: vi.fn() };
+});
+
+vi.mock('@/entities/unit', async () => {
+  const actual = await vi.importActual<typeof import('@/entities/unit')>('@/entities/unit');
+  return { ...actual, useUnits: vi.fn() };
 });
 
 vi.mock('@/entities/branch', async () => {
@@ -92,11 +99,32 @@ const SAMPLE_PRODUCTS: productModule.ProductSummary[] = [
     updatedAt: '2026-11-25T10:00:00Z',
     version: 1,
   },
+  {
+    id: 'prod-3',
+    name: 'Draft Mug',
+    brand: 'HomeCo',
+    productType: 'SIMPLE',
+    status: 'DRAFT',
+    categoryId: null,
+    categoryName: null,
+    unitId: 'u-1',
+    unitCode: 'PCS',
+    unitSymbol: 'pcs',
+    variantCount: 1,
+    defaultSku: 'MUG-001',
+    primaryBarcode: null,
+    minSellingPrice: 5.0,
+    maxSellingPrice: 5.0,
+    createdAt: '2026-11-25T10:00:00Z',
+    updatedAt: '2026-11-25T10:00:00Z',
+    version: 0,
+  },
 ];
 
 describe('ProductsListPage', () => {
   const archiveMutateAsync = vi.fn();
   const restoreMutateAsync = vi.fn();
+  const deleteDraftMutateAsync = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -126,6 +154,23 @@ describe('ProductsListPage', () => {
         },
       ],
     } as never);
+    vi.mocked(unitModule.useUnits).mockReturnValue({
+      data: [
+        {
+          id: 'u-1',
+          code: 'PCS',
+          name: 'Pieces',
+          symbol: 'pcs',
+          allowDecimal: false,
+          decimalPrecision: 0,
+          isSystem: true,
+          isActive: true,
+          createdAt: '',
+          updatedAt: '',
+          version: 0,
+        },
+      ],
+    } as never);
     vi.mocked(branchModule.useBranches).mockReturnValue({ data: [] } as never);
     vi.mocked(productModule.useArchiveProduct).mockReturnValue({
       mutateAsync: archiveMutateAsync,
@@ -133,6 +178,10 @@ describe('ProductsListPage', () => {
     } as never);
     vi.mocked(productModule.useRestoreProduct).mockReturnValue({
       mutateAsync: restoreMutateAsync,
+      isPending: false,
+    } as never);
+    vi.mocked(productModule.useDeleteDraftProduct).mockReturnValue({
+      mutateAsync: deleteDraftMutateAsync,
       isPending: false,
     } as never);
     vi.mocked(productModule.useProducts).mockReturnValue({
@@ -270,6 +319,43 @@ describe('ProductsListPage', () => {
 
     await waitFor(() => {
       expect(archiveMutateAsync).toHaveBeenCalledWith('prod-1');
+    });
+  });
+
+  it('filters by unit and brand and deletes a draft product after confirmation', async () => {
+    deleteDraftMutateAsync.mockResolvedValueOnce(undefined);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ProductsListPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByLabelText('Filter by unit of measure'), {
+      target: { value: 'u-1' },
+    });
+    fireEvent.change(screen.getByLabelText('Filter by brand'), {
+      target: { value: 'BasicCo' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await waitFor(() => {
+      expect(productModule.useProducts).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          unitId: 'u-1',
+          brand: 'BasicCo',
+        })
+      );
+    });
+
+    fireEvent.click(screen.getByLabelText('Delete draft Draft Mug'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Draft' }));
+
+    await waitFor(() => {
+      expect(deleteDraftMutateAsync).toHaveBeenCalledWith('prod-3');
     });
   });
 });

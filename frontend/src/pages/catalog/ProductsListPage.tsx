@@ -7,10 +7,12 @@ import {
   VariantLookup,
   productApi,
   useArchiveProduct,
+  useDeleteDraftProduct,
   useProducts,
   useRestoreProduct,
 } from '@/entities/product';
 import { useCategories } from '@/entities/category';
+import { useUnits } from '@/entities/unit';
 import { useBranches } from '@/entities/branch';
 import {
   PermissionGuard,
@@ -56,6 +58,8 @@ export const ProductsListPage: React.FC = () => {
 
   const searchParam = searchParams.get('search') ?? '';
   const categoryIdParam = searchParams.get('categoryId') ?? '';
+  const unitIdParam = searchParams.get('unitId') ?? '';
+  const brandParam = searchParams.get('brand') ?? '';
   const includeSubcategoriesParam = searchParams.get('includeSubcategories') === 'true';
   const statusFilterParam = searchParams.get('status') ?? 'DEFAULT';
   const productTypeParam = (searchParams.get('productType') ?? '') as ProductType | '';
@@ -64,12 +68,14 @@ export const ProductsListPage: React.FC = () => {
   const branchIdParam = searchParams.get('branchId') ?? undefined;
 
   const [searchInput, setSearchInput] = useState(searchParam);
+  const [brandInput, setBrandInput] = useState(brandParam);
   const [lookupCode, setLookupCode] = useState('');
   const [lookupResult, setLookupResult] = useState<VariantLookup | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupPending, setLookupPending] = useState(false);
 
   const [archiveTarget, setArchiveTarget] = useState<ProductSummary | null>(null);
+  const [deleteDraftTarget, setDeleteDraftTarget] = useState<ProductSummary | null>(null);
   const [pendingProductId, setPendingProductId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -88,6 +94,11 @@ export const ProductsListPage: React.FC = () => {
     branchId: branchIdParam,
     enabled: canReadCategories,
   });
+  const { data: units = [] } = useUnits({
+    includeInactive: false,
+    branchId: branchIdParam,
+    enabled: productScope.canRead,
+  });
 
   const queryParams = useMemo(() => {
     let status: ProductStatus | undefined;
@@ -102,6 +113,8 @@ export const ProductsListPage: React.FC = () => {
       search: searchParam || undefined,
       categoryId: categoryIdParam || undefined,
       includeSubcategories: categoryIdParam ? includeSubcategoriesParam : undefined,
+      unitId: unitIdParam || undefined,
+      brand: brandParam || undefined,
       status,
       productType: productTypeParam || undefined,
       includeArchived,
@@ -113,6 +126,8 @@ export const ProductsListPage: React.FC = () => {
   }, [
     searchParam,
     categoryIdParam,
+    unitIdParam,
+    brandParam,
     includeSubcategoriesParam,
     statusFilterParam,
     productTypeParam,
@@ -124,6 +139,7 @@ export const ProductsListPage: React.FC = () => {
   const { data: pageData, isLoading, isError, error, refetch } = useProducts(queryParams);
   const archiveMutation = useArchiveProduct();
   const restoreMutation = useRestoreProduct();
+  const deleteDraftMutation = useDeleteDraftProduct();
 
   const updateParams = (updates: Record<string, string | null>, resetPage = true) => {
     const next = new URLSearchParams(searchParams);
@@ -142,11 +158,15 @@ export const ProductsListPage: React.FC = () => {
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    updateParams({ search: searchInput.trim() || null });
+    updateParams({
+      search: searchInput.trim() || null,
+      brand: brandInput.trim() || null,
+    });
   };
 
   const handleClearFilters = () => {
     setSearchInput('');
+    setBrandInput('');
     setSearchParams(branchIdParam ? { branchId: branchIdParam } : {});
   };
 
@@ -195,6 +215,21 @@ export const ProductsListPage: React.FC = () => {
     }
   };
 
+  const handleConfirmDeleteDraft = async () => {
+    if (!deleteDraftTarget) return;
+    setActionError(null);
+    setPendingProductId(deleteDraftTarget.id);
+    try {
+      await deleteDraftMutation.mutateAsync(deleteDraftTarget.id);
+      setDeleteDraftTarget(null);
+    } catch (err) {
+      setActionError(parseApiError(err, 'Failed to delete draft product.').message);
+      setDeleteDraftTarget(null);
+    } finally {
+      setPendingProductId(null);
+    }
+  };
+
   const buildProductDetailUrl = (productId: string) =>
     branchIdParam && productScope.resolvedBranchId
       ? `/catalog/products/${productId}?branchId=${encodeURIComponent(productScope.resolvedBranchId)}`
@@ -228,6 +263,8 @@ export const ProductsListPage: React.FC = () => {
   const hasActiveFilters =
     Boolean(searchParam) ||
     Boolean(categoryIdParam) ||
+    Boolean(unitIdParam) ||
+    Boolean(brandParam) ||
     statusFilterParam !== 'DEFAULT' ||
     Boolean(productTypeParam);
 
@@ -369,8 +406,8 @@ export const ProductsListPage: React.FC = () => {
       <Card>
         <CardHeader className="pb-4 space-y-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 flex-1 max-w-md">
-              <div className="relative flex-1">
+            <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-2 flex-1 max-w-2xl">
+              <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
                 <Input
                   aria-label="Search products"
@@ -380,6 +417,13 @@ export const ProductsListPage: React.FC = () => {
                   className="pl-8 text-sm"
                 />
               </div>
+              <Input
+                aria-label="Filter by brand"
+                placeholder="Brand..."
+                value={brandInput}
+                onChange={(e) => setBrandInput(e.target.value)}
+                className="w-36 text-xs"
+              />
               <Button type="submit" variant="outline" size="sm">
                 Search
               </Button>
@@ -421,6 +465,20 @@ export const ProductsListPage: React.FC = () => {
                   <span>Include subcategories</span>
                 </label>
               )}
+
+              <select
+                aria-label="Filter by unit of measure"
+                value={unitIdParam}
+                onChange={(e) => updateParams({ unitId: e.target.value || null })}
+                className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs shadow-sm"
+              >
+                <option value="">All Units</option>
+                {units.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.code})
+                  </option>
+                ))}
+              </select>
 
               <select
                 aria-label="Filter by product type"
@@ -538,6 +596,7 @@ export const ProductsListPage: React.FC = () => {
               onEdit={(productId) => navigate(`/catalog/products/${productId}/edit`)}
               onArchive={(product) => setArchiveTarget(product)}
               onRestore={(product) => void handleRestore(product)}
+              onDeleteDraft={(product) => setDeleteDraftTarget(product)}
               onPageChange={(nextPage) =>
                 updateParams({ page: nextPage <= 0 ? null : String(nextPage) }, false)
               }
@@ -567,6 +626,31 @@ export const ProductsListPage: React.FC = () => {
             >
               {archiveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Archive Product
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Delete Draft Product Confirmation Dialog */}
+      <Dialog open={!!deleteDraftTarget} onOpenChange={(o) => !o && setDeleteDraftTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Draft Product</DialogTitle>
+            <DialogDescription>
+              Permanently delete draft product{' '}
+              <span className="font-semibold">{deleteDraftTarget?.name}</span>? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDraftTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteDraftMutation.isPending}
+              onClick={() => void handleConfirmDeleteDraft()}
+            >
+              {deleteDraftMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete Draft
             </Button>
           </DialogFooter>
         </DialogContent>

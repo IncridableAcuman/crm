@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useBranches, useCreateBranch } from '@/entities/branch';
+import { useBranch, useBranches, useCreateBranch } from '@/entities/branch';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Label } from '@/shared/ui/label';
@@ -24,7 +24,7 @@ import {
 } from '@/shared/ui/dialog';
 import { PermissionGuard } from '@/entities/permission';
 import { parseApiError } from '@/shared/api/errorHandler';
-import { GitBranch, Plus, Phone, MapPin, Loader2, CheckCircle2, Star } from 'lucide-react';
+import { GitBranch, Plus, Phone, MapPin, Loader2, CheckCircle2, Star, Eye, RefreshCw } from 'lucide-react';
 
 const BRANCH_CODE_REGEX = /^[A-Z0-9_-]{2,30}$/;
 
@@ -33,12 +33,21 @@ export const BranchesPage: React.FC = () => {
   const createBranchMutation = useCreateBranch();
 
   const [open, setOpen] = useState(false);
+  const [detailBranchId, setDetailBranchId] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [isMain, setIsMain] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const {
+    data: branchDetail,
+    isLoading: detailLoading,
+    isError: detailError,
+    error: detailErrorObj,
+    refetch: refetchDetail,
+  } = useBranch(detailBranchId ?? '', { enabled: !!detailBranchId });
 
   const resetForm = () => {
     setCode('');
@@ -261,6 +270,7 @@ export const BranchesPage: React.FC = () => {
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -316,6 +326,19 @@ export const BranchesPage: React.FC = () => {
                     <TableCell className="text-xs text-slate-500 font-mono">
                       {new Date(branch.createdAt).toLocaleDateString()}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`View branch ${branch.name}`}
+                        onClick={() => setDetailBranchId(branch.id)}
+                        className="h-7 px-2 text-xs gap-1"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>Details</span>
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -323,6 +346,91 @@ export const BranchesPage: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Branch Details Dialog (GET /api/v1/branches/:id) */}
+      <Dialog
+        open={!!detailBranchId}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setDetailBranchId(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitBranch className="h-4 w-4 text-slate-700" />
+              <span>Branch Details</span>
+            </DialogTitle>
+            <DialogDescription>
+              Live branch profile retrieved from the backend tenancy directory.
+            </DialogDescription>
+          </DialogHeader>
+
+          {detailLoading ? (
+            <div className="flex h-32 items-center justify-center text-sm text-slate-500 gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Loading branch details...</span>
+            </div>
+          ) : detailError || !branchDetail ? (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-center text-xs text-red-700 space-y-2">
+              <div>{parseApiError(detailErrorObj, 'Failed to load branch details.').message}</div>
+              <Button variant="outline" size="sm" onClick={() => void refetchDetail()} className="gap-1.5">
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>Retry</span>
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{branchDetail.name}</div>
+                  <div className="font-mono text-slate-500">{branchDetail.code}</div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant={branchDetail.isMain ? 'info' : 'outline'} className="text-[11px]">
+                    {branchDetail.isMain ? 'Main Branch' : 'Standard Branch'}
+                  </Badge>
+                  <Badge variant={branchDetail.isActive ? 'success' : 'destructive'} className="text-[11px]">
+                    {branchDetail.isActive ? 'Active' : 'Inactive'}
+                  </Badge>
+                </div>
+              </div>
+
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-md border border-slate-100 p-2.5">
+                  <dt className="text-slate-400">Branch ID</dt>
+                  <dd className="font-mono text-slate-800 break-all mt-0.5">{branchDetail.id}</dd>
+                </div>
+                <div className="rounded-md border border-slate-100 p-2.5">
+                  <dt className="text-slate-400">Phone</dt>
+                  <dd className="text-slate-800 mt-0.5">{branchDetail.phone || 'Not provided'}</dd>
+                </div>
+                <div className="rounded-md border border-slate-100 p-2.5 sm:col-span-2">
+                  <dt className="text-slate-400">Address</dt>
+                  <dd className="text-slate-800 mt-0.5">{branchDetail.address || 'Not provided'}</dd>
+                </div>
+                <div className="rounded-md border border-slate-100 p-2.5">
+                  <dt className="text-slate-400">Created At</dt>
+                  <dd className="font-mono text-slate-700 mt-0.5">
+                    {new Date(branchDetail.createdAt).toLocaleString()}
+                  </dd>
+                </div>
+                <div className="rounded-md border border-slate-100 p-2.5">
+                  <dt className="text-slate-400">Last Updated</dt>
+                  <dd className="font-mono text-slate-700 mt-0.5">
+                    {new Date(branchDetail.updatedAt).toLocaleString()}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDetailBranchId(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

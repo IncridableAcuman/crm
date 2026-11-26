@@ -144,24 +144,74 @@ gantt
 
 ---
 
-## Milestone 06 — Inventory Management (`M06.1` Completed; `M06.2–M06.11` Planned)
+## Milestone 06 — Inventory Management (`M06.1` Completed; `M06.2` Schema Landed; `M06.3–M06.11` Planned)
 
 * **Goal**: Establish a multi-tenant, warehouse-isolated physical inventory ledger, location-aware stock balance projections, receiving/counting/adjustment/two-step transfer workflows, stock reservations, `WAC` valuation, and `WAREHOUSE` RBAC authorization.
 * **Sub-Milestones**:
   - **M06.1 — Inventory Architecture & Domain Design** *(Completed — Documentation Only)*:
-    - **Scope**: Full bounded-context specification for Inventory (`com.savdocrm.modules.inventory`), domain aggregates/invariants/state machines, logical PostgreSQL 16 schema, `WAREHOUSE` RBAC scope & permission migration policy, REST API `/api/v1/inventory` contracts aligned with live `ApiResponse<PageResponse<T>>` / RFC 7807 `ProblemDetail`, cross-module public facades (`WarehouseQueryFacade`, `StockQueryFacade`, `StockMovementFacade`, `StockReservationFacade`), canonical deadlock-free lock ordering & `Idempotency-Key` protocol, ADRs (`ADR-0011`–`ADR-0016`), and verified doc-vs-code discrepancy audit.
+    - **Scope**: Full bounded-context specification for Inventory (`com.savdocrm.modules.inventory`), domain aggregates/invariants/state machines, logical PostgreSQL 16 schema, `WAREHOUSE` RBAC scope & permission migration policy, REST API `/api/v1/inventory` contracts aligned with live `ApiResponse<PageResponse<T>>` / RFC 7807 `ProblemDetail`, cross-module public facades (`WarehouseQueryFacade`, `StockQueryFacade`, `StockMovementFacade`, `StockReservationFacade`), canonical deadlock-free lock ordering & `Idempotency-Key` protocol, ADRs (`ADR-0011`–`ADR-0017`), and verified doc-vs-code discrepancy audit.
     - **Deliverables**: [06-inventory-management.md](06-inventory-management.md), [06-inventory-database-design.md](06-inventory-database-design.md), [06-inventory-api-contracts.md](06-inventory-api-contracts.md), [06-inventory-security.md](06-inventory-security.md), [06-inventory-integration.md](06-inventory-integration.md), [06-inventory-decisions.md](06-inventory-decisions.md), and [m06.1-architecture-review.md](../testing/m06.1-architecture-review.md).
     - **Exclusions**: Zero Java code, Liquibase XML migrations, REST controllers, or frontend components written in M06.1.
-  - **M06.2 — Inventory Database Schema & Liquibase Migrations** *(Planned)*: PostgreSQL tables (`v1.0.0/23+`), shared `idempotency_records`, `WAREHOUSE` RBAC assignment schema migration, and 20 new `inventory.*` permission seeds.
-  - **M06.3 — RBAC `WAREHOUSE` Scope Extension & Shared Idempotency Service** *(Planned)*: `RoleScopeType.WAREHOUSE`, `hasWarehousePermission` / `getPermittedWarehouseIds`, non-inheritance from `BRANCH`, and SHA-256 `IdempotencyService`.
-  - **M06.4 — Inventory Core, Warehouses, Locations, Ledger & WAC Costing** *(Planned)*: `Warehouse`, `StockLocation`, `StockBalance`, `WarehouseStockSummary`, `InventoryTransaction`/`Line`, `InventoryCost` (`WAC`), and internal moves.
-  - **M06.5 — Stock Receiving (`StockReceipt`)** *(Planned)*: `DRAFT`/`POSTED`/`CANCELLED` lifecycle, `ProductQueryFacade` validation, UOM precision enforcement, and WAC updates.
-  - **M06.6 — Stock Counting (`StockCount`) & Adjustments (`StockAdjustment`)** *(Planned)*: Snapshot-without-freeze cycle counts, concurrent movement reconciliation, and maker-checker adjustments / write-offs.
-  - **M06.7 — Two-Step Inter-Warehouse Stock Transfers (`StockTransfer`)** *(Planned)*: `DRAFT -> REQUESTED -> APPROVED -> DISPATCHED -> PARTIALLY_RECEIVED | RECEIVED | CLOSED_WITH_VARIANCE`, inbound `in_transit` accounting, and bidirectional lock-order concurrency tests.
-  - **M06.8 — Inventory Reservations & Cross-Module Public Facades** *(Planned)*: `InventoryReservation` holds, `ReservationExpirationJob` (`TenantExecutionTemplate`), and public facades for `Sales`/`Purchases`.
-  - **M06.9 — Inventory REST API & RBAC Controllers** *(Planned)*: `/api/v1/inventory/**` controllers, MapStruct DTOs, `Idempotency-Key` enforcement, ArchUnit & security MockMvc suites.
-  - **M06.10 — Inventory Frontend UI (React 19 / FSD)** *(Planned)*: Warehouses, locations, stock explorer, ledger viewer, receipts, counts, adjustments, transfers, reservations.
-  - **M06.11 — M06 Integration, Concurrency, Security & Quality Audit** *(Planned)*: End-to-end verification, concurrent race-condition Testcontainers suite, `WAREHOUSE` scope penetration tests, and contract audit.
+  - **M06.2 — Inventory Database Schema & Liquibase Migrations** *(Schema delivered ahead of plan; verification pending)*:
+    - **Scope**: Changesets `v1.0.0/23`–`v1.0.0/32`: 18 Inventory tables, shared `idempotency_records`, `WAREHOUSE` RBAC assignment migration, 20 `inventory.*` permission seeds.
+    - **Deliverables**: Already committed migration XML wired into `db.changelog-master.xml`, `InventoryDatabaseMigrationIntegrationTest`.
+    - **Dependencies**: M06.1.
+    - **Acceptance**: All changesets apply on a clean PostgreSQL 16 database; composite FKs, composite-factory guard constraints, idempotency uniqueness, RBAC scope constraints, and the 53-permission seed verified. **Outstanding**: repeat on a database populated with real M04/M05 data.
+    - **Exclusions**: Any Java entity/repository, REST endpoint, or frontend code.
+  - **M06.3 — RBAC `WAREHOUSE` Scope Extension & Shared Idempotency Service** *(Planned)*:
+    - **Scope**: `RoleScopeType.WAREHOUSE`; the 20 missing `Permissions` constants and `ALL_PERMISSIONS`/`SystemRoles` updates; `hasWarehousePermission`, `getPermittedWarehouseIds`; no `BRANCH` inheritance; SHA-256 `IdempotencyService`.
+    - **Deliverables**: Identity domain/service changes, tests proving branch→warehouse non-inheritance and OWNER elevation, idempotency service + unit/integration tests.
+    - **Dependencies**: M06.2 (columns/seed exist).
+    - **Acceptance**: Existing M04 tests still pass; a `BRANCH`-scoped user is denied warehouse writes; replay of a completed key returns the cached response; payload mismatch returns `422`.
+    - **Exclusions**: Inventory domain aggregates; warehouse CRUD UI; Sales/Purchases integration.
+  - **M06.4 — Inventory Core, Warehouses, Locations, Ledger & WAC Costing** *(Planned)*:
+    - **Scope**: `Warehouse`, `StockLocation`, `StockBalance`, `WarehouseStockSummary`, `InventoryTransaction`/`Line`, `InventoryCost`, posting service, internal moves, canonical lock ordering, reconciliation query.
+    - **Deliverables**: JPA entities/repositories, domain services, unit + Testcontainers concurrency/parity tests.
+    - **Dependencies**: M06.3.
+    - **Acceptance**: Ledger and both projections reconcile to zero drift; negative stock rejected; opposing transfers/multi-line postings deadlock-free under load; WAC formulas match the spec at scale 4.
+    - **Exclusions**: Receipts, counts, adjustments, transfers, reservations, REST controllers, UI.
+  - **M06.5 — Stock Receiving (`StockReceipt`)** *(Planned)*:
+    - **Scope**: `DRAFT`/`POSTED`/`CANCELLED` lifecycle, default-location resolution, catalog status + UOM validation, WAC update, idempotent posting.
+    - **Deliverables**: Receipt aggregate, application service, tests for catalog/archive/UOM rules.
+    - **Dependencies**: M06.4.
+    - **Acceptance**: Drafts never change stock; posting is atomic; archived variants reject new receipts; duplicate post returns the original result.
+    - **Exclusions**: Purchase order management, supplier data, adjustment/count workflows.
+  - **M06.6 — Stock Counting (`StockCount`) & Adjustments (`StockAdjustment`)** *(Planned)*:
+    - **Scope**: Snapshot-without-freeze counts, concurrent-movement detection/reconciliation policy, maker-checker adjustments and write-offs.
+    - **Deliverables**: Count and adjustment aggregates, approval service, variance→adjustment→ledger linkage.
+    - **Dependencies**: M06.4.
+    - **Acceptance**: Count approval under concurrent movement returns `409` or applies the authorized policy; reserved stock is never consumed by a decrement; every posted variance has one linked ledger transaction.
+    - **Exclusions**: Transfer variances, POS-driven stock issues.
+  - **M06.7 — Two-Step Inter-Warehouse Stock Transfers (`StockTransfer`)** *(Planned)*:
+    - **Scope**: `DRAFT` → `REQUESTED` → `APPROVED` → `DISPATCHED` → `PARTIALLY_RECEIVED`/`RECEIVED`/`CLOSED_WITH_VARIANCE`, inbound `in_transit`, good/damaged/short receipts, no cancel after dispatch.
+    - **Deliverables**: Transfer aggregate, dispatch/receive services, bidirectional concurrency tests.
+    - **Dependencies**: M06.4.
+    - **Acceptance**: In-transit equals dispatched minus received/shortage at all times; partial receipts do not over-credit; dispatched transfers cannot be cancelled; opposing transfers never deadlock.
+    - **Exclusions**: Carrier/logistics tracking, cross-tenant transfers.
+  - **M06.8 — Inventory Reservations & Cross-Module Public Facades** *(Planned)*:
+    - **Scope**: Reservation create/consume/release/expire, TTL job, `WarehouseQueryFacade`, `StockQueryFacade`, `StockMovementFacade`, `StockReservationFacade`, committed events.
+    - **Deliverables**: Reservation aggregate, expiration job with per-tenant context, facade contracts + DTOs, tests for expiration idempotency and partial consumption.
+    - **Dependencies**: M06.4, M06.5.
+    - **Acceptance**: Reservations never write ledger rows; available never negative; expired reservations release exactly once; facades work without leaking entities.
+    - **Exclusions**: Sales order/checkout implementation, payment logic.
+  - **M06.9 — Inventory REST API & RBAC Controllers** *(Planned)*:
+    - **Scope**: `/api/v1/inventory/**` endpoints from the API contract, MapStruct mappers, `Idempotency-Key` enforcement, `ApiResponse`/`PageResponse`/`ProblemDetail` shapes.
+    - **Deliverables**: Controllers, DTOs, MapStruct mappers, MockMvc security and contract tests.
+    - **Dependencies**: M06.4–M06.8.
+    - **Acceptance**: Every endpoint enforces its documented permission and scope; cross-tenant ids return `404`; cost fields are absent without `inventory.costs.read`; missing keys return `400`.
+    - **Exclusions**: Frontend, reporting exports, OpenAPI polish beyond Springdoc annotations.
+  - **M06.10 — Inventory Frontend UI (React 19 / FSD)** *(Planned)*:
+    - **Scope**: Warehouses/locations, stock explorer, ledger viewer, receipts, counts, adjustments, transfers, reservations.
+    - **Deliverables**: `entities/inventory`, `features/inventory/*`, `pages/inventory/*`, routes, `PermissionGuard` integration.
+    - **Dependencies**: M06.9.
+    - **Acceptance**: `tsc`/`vite build` pass; Vitest covers API unwrapping, permission gating, and tenant/warehouse cache isolation.
+    - **Exclusions**: POS terminal, purchasing screens, analytics dashboards.
+  - **M06.11 — M06 Integration, Concurrency, Security & Quality Audit** *(Planned)*:
+    - **Scope**: End-to-end verification, concurrent race-condition suite, `WAREHOUSE` scope penetration tests, contract audit, documentation sync.
+    - **Deliverables**: Audit report under `docs/testing/`, fixes for any findings, final status updates.
+    - **Dependencies**: M06.10.
+    - **Acceptance**: Full backend suite and frontend suite pass; zero overselling/deadlock in stress tests; no cross-tenant or cross-warehouse leakage; docs match code.
+    - **Exclusions**: Sales/Purchases/Finance module implementations.
 
 ---
 
