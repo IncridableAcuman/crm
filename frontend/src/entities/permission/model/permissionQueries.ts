@@ -86,3 +86,74 @@ export function useHasAnyScopePermission(permissionCode: string): boolean {
 
   return false;
 }
+
+export interface CatalogReadBranchScope {
+  canRead: boolean;
+  isTenantScoped: boolean;
+  authorizedBranchIds: string[];
+  resolvedBranchId: string | undefined;
+  invalidBranchRequested: boolean;
+}
+
+/**
+ * Resolves the required branchId parameter for M05.4 catalog read endpoints.
+ * - TENANT-scoped holders can read without branchId (resolvedBranchId = undefined unless explicitly requested).
+ * - BRANCH-only holders MUST pass an active authorized branchId on catalog GET requests;
+ *   without it, the backend fails closed with 403 Forbidden (ADR-0010).
+ * - Explicit unauthorized preferredBranchId fails closed (canRead = false, invalidBranchRequested = true)
+ *   rather than silently falling back to another branch.
+ */
+export function useCatalogReadBranchScope(
+  permissionCode: string,
+  preferredBranchId?: string
+): CatalogReadBranchScope {
+  const { data: permissions } = useMyPermissions();
+
+  if (!permissions) {
+    return {
+      canRead: false,
+      isTenantScoped: false,
+      authorizedBranchIds: [],
+      resolvedBranchId: undefined,
+      invalidBranchRequested: false,
+    };
+  }
+
+  const isTenantScoped = Boolean(permissions.tenantPermissions?.includes(permissionCode));
+  const authorizedBranchIds = permissions.branchPermissions
+    ? Object.entries(permissions.branchPermissions)
+        .filter(([, perms]) => perms.includes(permissionCode))
+        .map(([branchId]) => branchId)
+    : [];
+
+  if (isTenantScoped) {
+    return {
+      canRead: true,
+      isTenantScoped: true,
+      authorizedBranchIds,
+      resolvedBranchId: preferredBranchId || undefined,
+      invalidBranchRequested: false,
+    };
+  }
+
+  if (preferredBranchId && !authorizedBranchIds.includes(preferredBranchId)) {
+    return {
+      canRead: false,
+      isTenantScoped: false,
+      authorizedBranchIds,
+      resolvedBranchId: undefined,
+      invalidBranchRequested: true,
+    };
+  }
+
+  const firstBranchId = authorizedBranchIds[0];
+  const resolvedBranchId = preferredBranchId || firstBranchId;
+
+  return {
+    canRead: authorizedBranchIds.length > 0 && Boolean(resolvedBranchId),
+    isTenantScoped: false,
+    authorizedBranchIds,
+    resolvedBranchId,
+    invalidBranchRequested: false,
+  };
+}

@@ -27,6 +27,7 @@ import {
   Lock,
   Building2,
   RefreshCw,
+  Package,
 } from 'lucide-react';
 
 export const HomePage: React.FC = () => {
@@ -44,6 +45,7 @@ export const HomePage: React.FC = () => {
 
   const canReadBranches = useHasAnyScopePermission('tenancy.branches.read');
   const canReadRoles = useHasPermission('identity.roles.read');
+  const canReadProducts = useHasAnyScopePermission('catalog.products.read');
 
   const {
     data: branches = [],
@@ -115,6 +117,18 @@ export const HomePage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {canReadProducts && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/catalog/products')}
+              className="text-xs gap-1.5"
+            >
+              <Package className="h-3.5 w-3.5" />
+              <span>Product Catalog</span>
+            </Button>
+          )}
+
           {canReadBranches && (
             <Button
               variant="outline"
@@ -276,13 +290,13 @@ export const HomePage: React.FC = () => {
 
             <div className="flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50/50">
               <div className="flex items-center gap-3">
-                <Layers className="h-4 w-4 text-slate-400" />
+                <Layers className="h-4 w-4 text-emerald-600" />
                 <div>
-                  <div className="text-xs font-semibold text-slate-700">Catalog & Products</div>
-                  <div className="text-[11px] text-slate-400">Categories, brands, units of measure, variants</div>
+                  <div className="text-xs font-semibold text-slate-900">Catalog & Products</div>
+                  <div className="text-[11px] text-slate-500">Categories, units of measure, variants, barcodes</div>
                 </div>
               </div>
-              <Badge variant="secondary" className="text-[10px] text-slate-500">Milestone 05</Badge>
+              <Badge variant="success" className="text-[10px]">Ready & Active</Badge>
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50/50">

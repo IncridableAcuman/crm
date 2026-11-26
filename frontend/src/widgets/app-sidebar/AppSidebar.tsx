@@ -7,6 +7,7 @@ import {
   Users,
   ShoppingCart,
   Package,
+  FolderTree,
   Boxes,
 } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
@@ -17,8 +18,7 @@ interface NavItem {
   title: string;
   to: string;
   icon: React.ElementType;
-  permission?: string;
-  allowBranchScope?: boolean;
+  visible?: boolean;
   badge?: string;
 }
 
@@ -33,51 +33,59 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 }) => {
   const canReadBranches = useHasAnyScopePermission('tenancy.branches.read');
   const canReadRoles = useHasPermission('identity.roles.read');
+  const canReadProducts = useHasAnyScopePermission('catalog.products.read');
+  const canReadCategories = useHasAnyScopePermission('catalog.categories.read');
 
   const mainNavItems: NavItem[] = [
     {
       title: 'Dashboard',
       to: '/',
       icon: LayoutDashboard,
+      visible: true,
+    },
+    {
+      title: 'Product Catalog',
+      to: '/catalog/products',
+      icon: Package,
+      visible: canReadProducts,
+    },
+    {
+      title: 'Categories & Units',
+      to: '/catalog/categories',
+      icon: FolderTree,
+      visible: canReadCategories,
     },
     {
       title: 'Store Branches',
       to: '/branches',
       icon: GitBranch,
-      permission: 'tenancy.branches.read',
-      allowBranchScope: true,
+      visible: canReadBranches,
     },
     {
       title: 'Roles & Permissions',
       to: '/roles',
       icon: ShieldCheck,
-      permission: 'identity.roles.read',
+      visible: canReadRoles,
     },
     {
       title: 'Role Assignments',
       to: '/assignments',
       icon: Users,
-      permission: 'identity.roles.read',
+      visible: canReadRoles,
     },
   ];
 
   const comingSoonItems: NavItem[] = [
     {
-      title: 'Point of Sale (POS)',
-      to: '/pos',
-      icon: ShoppingCart,
-      badge: 'M06',
-    },
-    {
-      title: 'Product Catalog',
-      to: '/catalog',
-      icon: Package,
-      badge: 'M05',
-    },
-    {
       title: 'Stock & Inventory',
       to: '/inventory',
       icon: Boxes,
+      badge: 'M06',
+    },
+    {
+      title: 'Point of Sale (POS)',
+      to: '/pos',
+      icon: ShoppingCart,
       badge: 'M07',
     },
   ];
@@ -91,10 +99,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           </div>
           <nav className="space-y-1" aria-label="Main navigation">
             {mainNavItems.map((item) => {
-              if (item.permission === 'tenancy.branches.read' && !canReadBranches) {
-                return null;
-              }
-              if (item.permission === 'identity.roles.read' && !canReadRoles) {
+              if (!item.visible) {
                 return null;
               }
 
