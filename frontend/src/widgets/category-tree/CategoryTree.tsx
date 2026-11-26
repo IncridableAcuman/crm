@@ -85,7 +85,7 @@ export const CategoryTree: React.FC<CategoryTreeProps> = ({
       <div key={node.id} className="space-y-1">
         <div
           className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 hover:border-slate-300"
-          style={{ marginLeft: `${node.depth * 20}px` }}
+          style={{ marginLeft: `${Math.min(node.depth * 20, 64)}px` }}
         >
           <div className="flex items-center gap-2 min-w-0">
             {hasChildren ? (

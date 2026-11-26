@@ -338,7 +338,7 @@ export const UnitManagerPanel: React.FC<UnitManagerPanelProps> = ({ branchId }) 
             No units of measure found.
           </div>
         ) : (
-          <Table>
+          <Table className="min-w-[720px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Code</TableHead>
@@ -445,7 +445,7 @@ export const UnitManagerPanel: React.FC<UnitManagerPanelProps> = ({ branchId }) 
 
           {!editingUnit ? (
             <form onSubmit={handleCreateSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="unit-code">Code *</Label>
                   <Input
@@ -477,7 +477,7 @@ export const UnitManagerPanel: React.FC<UnitManagerPanelProps> = ({ branchId }) 
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-4 rounded-md border border-slate-200 p-3">
+              <div className="flex flex-col gap-3 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" {...createForm.register('allowDecimal')} />
                   <span>Allow decimal quantities</span>
@@ -515,7 +515,7 @@ export const UnitManagerPanel: React.FC<UnitManagerPanelProps> = ({ branchId }) 
             </form>
           ) : (
             <form onSubmit={handleEditSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="edit-unit-name">Name *</Label>
                   <Input id="edit-unit-name" {...editForm.register('name')} />
@@ -534,7 +534,7 @@ export const UnitManagerPanel: React.FC<UnitManagerPanelProps> = ({ branchId }) 
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-4 rounded-md border border-slate-200 p-3">
+              <div className="flex flex-col gap-3 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" {...editForm.register('allowDecimal')} />
                   <span>Allow decimal quantities</span>

@@ -40,8 +40,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white/95 px-4 sm:px-6 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-40 flex h-16 w-full shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white/95 px-3 sm:px-6 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         {onToggleMobileMenu && (
           <Button
             type="button"
@@ -62,7 +62,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-900 text-base leading-none truncate max-w-[140px] sm:max-w-none">
+              <span className="font-bold text-slate-900 text-sm sm:text-base leading-none truncate max-w-[110px] sm:max-w-[180px] md:max-w-none">
                 {activeTenant ? activeTenant.tenantName : 'SAVDOCRM'}
               </span>
               {activeTenant && (
@@ -78,7 +78,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
       <div className="flex items-center gap-2 sm:gap-3">
         {user && (
-          <div className="hidden sm:flex items-center gap-2 text-right">
+          <div className="hidden md:flex items-center gap-2 text-right">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200">
               {user.firstName?.[0] || <UserIcon className="h-4 w-4" />}
             </div>

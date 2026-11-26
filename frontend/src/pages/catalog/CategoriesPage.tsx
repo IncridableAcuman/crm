@@ -169,7 +169,7 @@ export const CategoriesPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <FolderTree className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               Categories & Units of Measure
             </h1>
           </div>

@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-32-seed-inventory-permissions" author="savdocrm-security">
+        <comment>Seed 20 granular M06 inventory permissions (expanding catalog from 33 to 53) and assign them to existing OWNER system roles without mutating custom roles</comment>
+
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000022"/>
+            <column name="code" value="inventory.warehouses.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="warehouses"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View warehouses and storage locations"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000023"/>
+            <column name="code" value="inventory.warehouses.manage"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="warehouses"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, update, and deactivate warehouses and stock locations"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000024"/>
+            <column name="code" value="inventory.costs.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="costs"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View weighted average unit costs and inventory valuations"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000025"/>
+            <column name="code" value="inventory.ledger.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="ledger"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View immutable inventory ledger transactions and lines"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000026"/>
+            <column name="code" value="inventory.moves.create"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="moves"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Execute internal location putaway, bin transfer, and quarantine moves"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000027"/>
+            <column name="code" value="inventory.receipts.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="receipts"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View stock receipt documents"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000028"/>
+            <column name="code" value="inventory.receipts.create"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="receipts"/>
+            <column name="action" value="create"/>
+            <column name="description" value="Create and edit draft stock receipts"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000029"/>
+            <column name="code" value="inventory.receipts.post"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="receipts"/>
+            <column name="action" value="post"/>
+            <column name="description" value="Post stock receipts to inventory ledger and update WAC"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000002a"/>
+            <column name="code" value="inventory.receipts.cancel"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="receipts"/>
+            <column name="action" value="cancel"/>
+            <column name="description" value="Cancel draft stock receipts"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000002b"/>
+            <column name="code" value="inventory.counts.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="counts"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View cycle and physical stock count sessions"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000002c"/>
+            <column name="code" value="inventory.counts.manage"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="counts"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, start, record counted quantities, and submit stock counts"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000002d"/>
+            <column name="code" value="inventory.counts.approve"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="counts"/>
+            <column name="action" value="approve"/>
+            <column name="description" value="Approve and post stock count variances"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000002e"/>
+            <column name="code" value="inventory.adjustments.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="adjustments"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View stock adjustment documents"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-00000000002f"/>
+            <column name="code" value="inventory.adjustments.approve"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="adjustments"/>
+            <column name="action" value="approve"/>
+            <column name="description" value="Approve, post, or reject stock adjustments and compensating reversals"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000030"/>
+            <column name="code" value="inventory.transfers.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="transfers"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View inter-warehouse stock transfer documents"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000031"/>
+            <column name="code" value="inventory.transfers.dispatch"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="transfers"/>
+            <column name="action" value="dispatch"/>
+            <column name="description" value="Approve and dispatch outgoing stock transfers"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000032"/>
+            <column name="code" value="inventory.transfers.receive"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="transfers"/>
+            <column name="action" value="receive"/>
+            <column name="description" value="Receive and reconcile incoming stock transfers"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000033"/>
+            <column name="code" value="inventory.transfers.cancel"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="transfers"/>
+            <column name="action" value="cancel"/>
+            <column name="description" value="Cancel pre-dispatch stock transfers"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000034"/>
+            <column name="code" value="inventory.reservations.read"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="reservations"/>
+            <column name="action" value="read"/>
+            <column name="description" value="View active and historical stock reservations"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="permissions">
+            <column name="id" value="00000000-0000-4000-a000-000000000035"/>
+            <column name="code" value="inventory.reservations.manage"/>
+            <column name="module" value="inventory"/>
+            <column name="resource" value="reservations"/>
+            <column name="action" value="manage"/>
+            <column name="description" value="Create, release, and manually manage stock reservations"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+
+        <sql dbms="postgresql">
+            INSERT INTO role_permissions (id, tenant_id, role_id, permission_id, created_at)
+            SELECT gen_random_uuid(), r.tenant_id, r.id, p.id, CURRENT_TIMESTAMP
+            FROM roles r
+            CROSS JOIN permissions p
+            WHERE r.code = 'OWNER'
+              AND r.is_system = TRUE
+              AND p.id BETWEEN '00000000-0000-4000-a000-000000000022'::uuid
+                           AND '00000000-0000-4000-a000-000000000035'::uuid
+              AND NOT EXISTS (
+                  SELECT 1 FROM role_permissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );
+        </sql>
+
+        <rollback>
+            <sql dbms="postgresql">
+                DELETE FROM role_permissions
+                WHERE permission_id BETWEEN '00000000-0000-4000-a000-000000000022'::uuid
+                                        AND '00000000-0000-4000-a000-000000000035'::uuid;
+
+                DELETE FROM permissions
+                WHERE id BETWEEN '00000000-0000-4000-a000-000000000022'::uuid
+                             AND '00000000-0000-4000-a000-000000000035'::uuid;
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

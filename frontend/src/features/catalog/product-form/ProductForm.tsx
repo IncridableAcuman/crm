@@ -656,7 +656,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
             </div>
 
             {variantOptions.length < 3 && (
-              <div className="flex gap-2 max-w-sm">
+              <div className="flex flex-col gap-2 sm:max-w-sm sm:flex-row">
                 <Input
                   placeholder="Option name (e.g. Color)"
                   value={newOptionName}
@@ -678,7 +678,7 @@ export const ProductForm: React.FC<ProductFormProps> = ({
       )}
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-base">
               {productType === 'SIMPLE' ? '2. SKU, Pricing & Barcodes' : '3. Variants & Barcodes'}

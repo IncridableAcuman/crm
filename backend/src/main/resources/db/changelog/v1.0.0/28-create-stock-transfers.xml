@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-28-create-stock-transfers" author="savdocrm-inventory">
+        <comment>Create stock_transfers and stock_transfer_lines tables for two-step dispatch and in-transit receipt workflows</comment>
+
+        <createTable tableName="stock_transfers">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_transfers" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_transfers_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="transfer_number" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="destination_warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(24)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="requested_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="approved_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="approved_by" type="UUID"/>
+            <column name="dispatched_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="dispatched_by" type="UUID"/>
+            <column name="dispatch_transaction_id" type="UUID"/>
+            <column name="received_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_transfers"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_stock_transfers_tenant_id"/>
+
+        <addUniqueConstraint tableName="stock_transfers"
+                             columnNames="tenant_id, transfer_number"
+                             constraintName="uq_stock_transfers_number"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfers"
+                                 baseColumnNames="tenant_id, source_warehouse_id"
+                                 constraintName="fk_stock_transfers_source_wh"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfers"
+                                 baseColumnNames="tenant_id, destination_warehouse_id"
+                                 constraintName="fk_stock_transfers_dest_wh"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfers"
+                                 baseColumnNames="tenant_id, dispatch_transaction_id"
+                                 constraintName="fk_stock_transfers_dispatch_txn"
+                                 referencedTableName="inventory_transactions"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="stock_transfers" indexName="idx_stock_transfers_src_status">
+            <column name="tenant_id"/>
+            <column name="source_warehouse_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <createIndex tableName="stock_transfers" indexName="idx_stock_transfers_dest_status">
+            <column name="tenant_id"/>
+            <column name="destination_warehouse_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_transfers
+            ADD CONSTRAINT chk_stock_transfers_distinct_wh
+            CHECK (source_warehouse_id &lt;&gt; destination_warehouse_id);
+
+            ALTER TABLE stock_transfers
+            ADD CONSTRAINT chk_stock_transfers_status
+            CHECK (status IN (
+                'DRAFT', 'REQUESTED', 'APPROVED', 'DISPATCHED',
+                'PARTIALLY_RECEIVED', 'RECEIVED', 'CLOSED_WITH_VARIANCE', 'CANCELLED'
+            ));
+        </sql>
+
+        <createTable tableName="stock_transfer_lines">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_transfer_lines" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_transfer_lines_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="transfer_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="line_number" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="destination_warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="destination_location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="requested_quantity" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="dispatched_quantity" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="received_good_quantity" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="received_damaged_quantity" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="shortage_quantity" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="unit_cost_snapshot" type="NUMERIC(15,4)"/>
+            <column name="variance_reason" type="VARCHAR(255)"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_transfer_lines"
+                             columnNames="tenant_id, transfer_id, line_number"
+                             constraintName="uq_stock_transfer_lines_no"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfer_lines"
+                                 baseColumnNames="tenant_id, transfer_id"
+                                 constraintName="fk_stock_transfer_lines_transfer"
+                                 referencedTableName="stock_transfers"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfer_lines"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_stock_transfer_lines_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfer_lines"
+                                 baseColumnNames="tenant_id, source_warehouse_id, source_location_id"
+                                 constraintName="fk_stock_transfer_lines_src_loc"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_transfer_lines"
+                                 baseColumnNames="tenant_id, destination_warehouse_id, destination_location_id"
+                                 constraintName="fk_stock_transfer_lines_dest_loc"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_transfer_lines
+            ADD CONSTRAINT chk_stock_transfer_lines_distinct_wh
+            CHECK (source_warehouse_id &lt;&gt; destination_warehouse_id);
+
+            ALTER TABLE stock_transfer_lines
+            ADD CONSTRAINT chk_stock_transfer_lines_vals
+            CHECK (
+                line_number &gt; 0
+                AND requested_quantity &gt; 0
+                AND dispatched_quantity &gt;= 0
+                AND received_good_quantity &gt;= 0
+                AND received_damaged_quantity &gt;= 0
+                AND shortage_quantity &gt;= 0
+                AND (received_good_quantity + received_damaged_quantity + shortage_quantity &lt;= dispatched_quantity)
+                AND (unit_cost_snapshot IS NULL OR unit_cost_snapshot &gt;= 0)
+            );
+        </sql>
+
+        <rollback>
+            <dropTable tableName="stock_transfer_lines"/>
+            <dropTable tableName="stock_transfers"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

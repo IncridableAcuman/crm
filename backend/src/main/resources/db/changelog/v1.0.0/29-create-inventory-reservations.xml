@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-29-create-inventory-reservations" author="savdocrm-inventory">
+        <comment>Create inventory_reservations and inventory_reservation_lines tables for soft stock holds and TTL expiration</comment>
+
+        <createTable tableName="inventory_reservations">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_inventory_reservations" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_inv_res_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="reservation_number" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_type" type="VARCHAR(24)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_reference_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(24)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="expires_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="released_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="inventory_reservations"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_inv_res_tenant_id"/>
+
+        <addUniqueConstraint tableName="inventory_reservations"
+                             columnNames="tenant_id, reservation_number"
+                             constraintName="uq_inv_res_number"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_reservations"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_inv_res_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="inventory_reservations" indexName="idx_inv_res_source">
+            <column name="tenant_id"/>
+            <column name="source_type"/>
+            <column name="source_reference_id"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE inventory_reservations
+            ADD CONSTRAINT chk_inv_res_source_type
+            CHECK (source_type IN ('SALES_ORDER', 'QUOTE', 'POS_HOLD', 'MANUAL'));
+
+            ALTER TABLE inventory_reservations
+            ADD CONSTRAINT chk_inv_res_status
+            CHECK (status IN ('ACTIVE', 'PARTIALLY_CONSUMED', 'CONSUMED', 'RELEASED', 'EXPIRED'));
+
+            CREATE INDEX idx_inv_res_expiry
+            ON inventory_reservations (tenant_id, expires_at)
+            WHERE status IN ('ACTIVE', 'PARTIALLY_CONSUMED') AND expires_at IS NOT NULL;
+        </sql>
+
+        <createTable tableName="inventory_reservation_lines">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_inventory_reservation_lines" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_inv_res_lines_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="reservation_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reserved_quantity" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="consumed_quantity" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="released_quantity" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="inventory_reservation_lines"
+                             columnNames="tenant_id, reservation_id, location_id, variant_id"
+                             constraintName="uq_inv_res_lines_item"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_reservation_lines"
+                                 baseColumnNames="tenant_id, reservation_id"
+                                 constraintName="fk_inv_res_lines_res"
+                                 referencedTableName="inventory_reservations"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_reservation_lines"
+                                 baseColumnNames="tenant_id, warehouse_id, location_id"
+                                 constraintName="fk_inv_res_lines_location"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_reservation_lines"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_inv_res_lines_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE inventory_reservation_lines
+            ADD CONSTRAINT chk_inv_res_lines_vals
+            CHECK (
+                reserved_quantity &gt; 0
+                AND consumed_quantity &gt;= 0
+                AND released_quantity &gt;= 0
+                AND (consumed_quantity + released_quantity &lt;= reserved_quantity)
+            );
+        </sql>
+
+        <rollback>
+            <dropTable tableName="inventory_reservation_lines"/>
+            <dropTable tableName="inventory_reservations"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

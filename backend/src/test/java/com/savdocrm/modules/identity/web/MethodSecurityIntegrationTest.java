@@ -284,13 +284,13 @@ class MethodSecurityIntegrationTest {
     }
 
     @Test
-    @DisplayName("Method Security: GET /api/v1/permissions returns all 33 permissions for authorized user")
-    void shouldReturn33CatalogPermissionsForAuthorizedUser() throws Exception {
+    @DisplayName("Method Security: GET /api/v1/permissions returns all 53 DB permissions for authorized user")
+    void shouldReturn53CatalogPermissionsForAuthorizedUser() throws Exception {
         mockMvc.perform(get("/api/v1/permissions")
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.length()").value(33))
+                .andExpect(jsonPath("$.data.length()").value(53))
                 .andExpect(jsonPath("$.data[0].code").isNotEmpty());
     }
 

@@ -5,7 +5,7 @@ import { Store } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+    <div className="min-h-dvh flex items-center justify-center bg-slate-50 p-4 py-8">
       <Card className="w-full max-w-md shadow-lg border-slate-200">
         <CardHeader className="text-center space-y-2">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">

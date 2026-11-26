@@ -213,7 +213,7 @@ export const RoleAssignmentsPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <Users className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Role Assignments</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Role Assignments</h1>
           </div>
           <p className="text-sm text-slate-500 mt-1">
             Assign store roles to members with TENANT or BRANCH scope. Last Active Owner protected.
@@ -289,7 +289,7 @@ export const RoleAssignmentsPage: React.FC = () => {
 
                 <div className="space-y-1.5">
                   <Label>Scope Type *</Label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <label
                       className={`flex items-center gap-2 p-3 rounded-lg border text-xs cursor-pointer ${
                         scopeType === 'TENANT'
@@ -408,14 +408,14 @@ export const RoleAssignmentsPage: React.FC = () => {
               </CardDescription>
             </div>
 
-            <form onSubmit={handleApplyFilter} className="flex items-center gap-2">
-              <div className="relative">
+            <form onSubmit={handleApplyFilter} className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <div className="relative w-full sm:w-auto">
                 <Input
                   aria-label="Filter by Membership ID"
                   placeholder="Filter by Membership UUID..."
                   value={filterMembershipId}
                   onChange={(e) => setFilterMembershipId(e.target.value)}
-                  className="h-8 w-56 sm:w-64 text-xs font-mono pr-7"
+                  className="h-8 w-full sm:w-64 text-xs font-mono pr-7"
                 />
                 {(filterMembershipId || appliedFilter) && (
                   <button
@@ -428,7 +428,7 @@ export const RoleAssignmentsPage: React.FC = () => {
                   </button>
                 )}
               </div>
-              <Button type="submit" variant="outline" size="sm" className="h-8 text-xs gap-1">
+              <Button type="submit" variant="outline" size="sm" className="h-8 gap-1 self-start text-xs sm:self-auto">
                 <Search className="h-3.5 w-3.5" />
                 <span>Filter</span>
               </Button>
@@ -462,7 +462,7 @@ export const RoleAssignmentsPage: React.FC = () => {
               </p>
             </div>
           ) : (
-            <Table>
+            <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Role</TableHead>

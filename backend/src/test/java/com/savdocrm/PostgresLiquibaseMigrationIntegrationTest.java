@@ -75,8 +75,8 @@ class PostgresLiquibaseMigrationIntegrationTest {
         );
         assertThat(indexCount).isNotNull().isEqualTo(1);
 
-        // Verify M04.2 changesets 09-15 and M05.2 changesets 16-21 were executed
-        for (int i = 9; i <= 21; i++) {
+        // Verify M04.2 (09-15), M05.2 (16-22), and M06.2 (23-32) changesets were executed
+        for (int i = 9; i <= 32; i++) {
             String prefix = String.format("v1.0.0-%02d-", i);
             Integer migrationChangesetCount = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM databasechangelog WHERE id LIKE ?",
@@ -89,11 +89,11 @@ class PostgresLiquibaseMigrationIntegrationTest {
                     .isEqualTo(1);
         }
 
-        // Verify permissions table has 33 seeded permissions
+        // Verify permissions table has 53 seeded permissions (33 base + 20 M06 inventory)
         Integer permCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM permissions",
                 Integer.class
         );
-        assertThat(permCount).isNotNull().isEqualTo(33);
+        assertThat(permCount).isNotNull().isEqualTo(53);
     }
 }

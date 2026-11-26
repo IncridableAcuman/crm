@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-25-create-inventory-ledger" author="savdocrm-inventory">
+        <comment>Create immutable header-line inventory_transactions and inventory_transaction_lines ledger tables</comment>
+
+        <createTable tableName="inventory_transactions">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_inventory_transactions" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_inv_txn_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="transaction_number" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="movement_type" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reference_type" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reference_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reversed_transaction_id" type="UUID"/>
+            <column name="idempotency_key" type="VARCHAR(128)"/>
+            <column name="occurred_at" type="TIMESTAMP WITH TIME ZONE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="posted_by" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="inventory_transactions"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_inv_txn_tenant_id"/>
+
+        <addUniqueConstraint tableName="inventory_transactions"
+                             columnNames="tenant_id, transaction_number"
+                             constraintName="uq_inv_txn_number"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_transactions"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_inv_txn_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_transactions"
+                                 baseColumnNames="tenant_id, reversed_transaction_id"
+                                 constraintName="fk_inv_txn_reversed"
+                                 referencedTableName="inventory_transactions"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="inventory_transactions" indexName="idx_inv_txn_ref">
+            <column name="tenant_id"/>
+            <column name="reference_type"/>
+            <column name="reference_id"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE inventory_transactions
+            ADD CONSTRAINT chk_inv_txn_movement_type
+            CHECK (movement_type IN (
+                'OPENING_BALANCE', 'PURCHASE_RECEIPT', 'PURCHASE_RETURN',
+                'SALE_ISSUE', 'SALE_RETURN',
+                'ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'WRITE_OFF',
+                'TRANSFER_OUT', 'TRANSFER_IN',
+                'INTERNAL_MOVE_OUT', 'INTERNAL_MOVE_IN', 'REVERSAL'
+            ));
+
+            ALTER TABLE inventory_transactions
+            ADD CONSTRAINT chk_inv_txn_reference_type
+            CHECK (reference_type IN (
+                'STOCK_RECEIPT', 'PURCHASE_ORDER', 'SALES_ORDER', 'SALES_RETURN',
+                'PURCHASE_RETURN', 'STOCK_ADJUSTMENT', 'STOCK_COUNT',
+                'STOCK_TRANSFER', 'INTERNAL_MOVE', 'REVERSAL', 'OPENING_BALANCE'
+            ));
+
+            ALTER TABLE inventory_transactions
+            ADD CONSTRAINT chk_inv_txn_reversal
+            CHECK (
+                (movement_type = 'REVERSAL' AND reversed_transaction_id IS NOT NULL)
+                OR (movement_type &lt;&gt; 'REVERSAL' AND reversed_transaction_id IS NULL)
+            );
+
+            CREATE UNIQUE INDEX uq_inv_txn_reversal_once
+            ON inventory_transactions (tenant_id, reversed_transaction_id)
+            WHERE reversed_transaction_id IS NOT NULL;
+
+            CREATE INDEX idx_inv_txn_wh_occurred
+            ON inventory_transactions (tenant_id, warehouse_id, occurred_at DESC);
+        </sql>
+
+        <createTable tableName="inventory_transaction_lines">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_inventory_transaction_lines" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_inv_txn_lines_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="transaction_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="line_number" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quantity_delta" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quantity_before" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quantity_after" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="unit_cost" type="NUMERIC(15,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_cost" type="NUMERIC(18,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="wac_before" type="NUMERIC(15,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="wac_after" type="NUMERIC(15,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="inventory_transaction_lines"
+                             columnNames="tenant_id, transaction_id, line_number"
+                             constraintName="uq_inv_txn_line_no"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_transaction_lines"
+                                 baseColumnNames="tenant_id, transaction_id"
+                                 constraintName="fk_inv_txn_lines_txn"
+                                 referencedTableName="inventory_transactions"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_transaction_lines"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_inv_txn_lines_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_transaction_lines"
+                                 baseColumnNames="tenant_id, warehouse_id, location_id"
+                                 constraintName="fk_inv_txn_lines_location"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="inventory_transaction_lines"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_inv_txn_lines_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE inventory_transaction_lines
+            ADD CONSTRAINT chk_inv_txn_lines_positive_line_no
+            CHECK (line_number &gt; 0);
+
+            ALTER TABLE inventory_transaction_lines
+            ADD CONSTRAINT chk_inv_txn_lines_quantities
+            CHECK (
+                quantity_delta &lt;&gt; 0
+                AND quantity_before &gt;= 0
+                AND quantity_after &gt;= 0
+                AND quantity_after = quantity_before + quantity_delta
+            );
+
+            ALTER TABLE inventory_transaction_lines
+            ADD CONSTRAINT chk_inv_txn_lines_costs
+            CHECK (unit_cost &gt;= 0 AND wac_before &gt;= 0 AND wac_after &gt;= 0);
+
+            CREATE INDEX idx_inv_txn_lines_variant_time
+            ON inventory_transaction_lines (tenant_id, variant_id, created_at DESC);
+
+            CREATE INDEX idx_inv_txn_lines_loc_variant
+            ON inventory_transaction_lines (tenant_id, warehouse_id, location_id, variant_id, created_at DESC);
+        </sql>
+
+        <rollback>
+            <dropTable tableName="inventory_transaction_lines"/>
+            <dropTable tableName="inventory_transactions"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

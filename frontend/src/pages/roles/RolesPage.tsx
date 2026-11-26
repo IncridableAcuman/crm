@@ -243,7 +243,7 @@ export const RolesPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Roles & Permissions</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Roles & Permissions</h1>
           </div>
           <p className="text-sm text-slate-500 mt-1">
             System and custom roles governing tenant and branch access rights.
@@ -440,7 +440,7 @@ export const RolesPage: React.FC = () => {
               </Button>
             </div>
           ) : (
-            <Table>
+            <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Role</TableHead>

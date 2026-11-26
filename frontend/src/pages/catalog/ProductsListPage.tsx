@@ -238,7 +238,7 @@ export const ProductsListPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <Package className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Product Catalog</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Product Catalog</h1>
           </div>
           <p className="text-sm text-slate-500 mt-1">
             Search and manage products, variant matrices, SKUs, barcodes, and reference pricing.

@@ -28,5 +28,15 @@
     <include file="db/changelog/v1.0.0/20-create-product-variants.xml"/>
     <include file="db/changelog/v1.0.0/21-create-product-barcodes.xml"/>
     <include file="db/changelog/v1.0.0/22-enforce-catalog-tenant-delete-restrict.xml"/>
+    <include file="db/changelog/v1.0.0/23-create-warehouses-and-locations.xml"/>
+    <include file="db/changelog/v1.0.0/24-create-inventory-balances-and-costs.xml"/>
+    <include file="db/changelog/v1.0.0/25-create-inventory-ledger.xml"/>
+    <include file="db/changelog/v1.0.0/26-create-stock-receipts.xml"/>
+    <include file="db/changelog/v1.0.0/27-create-stock-counts-and-adjustments.xml"/>
+    <include file="db/changelog/v1.0.0/28-create-stock-transfers.xml"/>
+    <include file="db/changelog/v1.0.0/29-create-inventory-reservations.xml"/>
+    <include file="db/changelog/v1.0.0/30-create-idempotency-records.xml"/>
+    <include file="db/changelog/v1.0.0/31-extend-rbac-warehouse-scope.xml"/>
+    <include file="db/changelog/v1.0.0/32-seed-inventory-permissions.xml"/>
 
 </databaseChangeLog>

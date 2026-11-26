@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-27-create-stock-counts-and-adjustments" author="savdocrm-inventory">
+        <comment>Create stock_counts, stock_count_lines, stock_adjustments, and stock_adjustment_lines tables</comment>
+
+        <createTable tableName="stock_counts">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_counts" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_counts_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="count_number" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="count_scope" type="VARCHAR(24)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(24)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="snapshot_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="started_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="submitted_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="approved_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="approved_by" type="UUID"/>
+            <column name="generated_adjustment_id" type="UUID"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_counts"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_stock_counts_tenant_id"/>
+
+        <addUniqueConstraint tableName="stock_counts"
+                             columnNames="tenant_id, count_number"
+                             constraintName="uq_stock_counts_number"/>
+
+        <addForeignKeyConstraint baseTableName="stock_counts"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_stock_counts_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="stock_counts" indexName="idx_stock_counts_wh_status">
+            <column name="tenant_id"/>
+            <column name="warehouse_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_counts
+            ADD CONSTRAINT chk_stock_counts_scope
+            CHECK (count_scope IN ('FULL_WAREHOUSE', 'PARTIAL_SCOPE'));
+
+            ALTER TABLE stock_counts
+            ADD CONSTRAINT chk_stock_counts_status
+            CHECK (status IN ('DRAFT', 'IN_PROGRESS', 'PENDING_APPROVAL', 'APPROVED_AND_POSTED', 'CANCELLED'));
+        </sql>
+
+        <createTable tableName="stock_count_lines">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_count_lines" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_count_lines_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="count_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="system_quantity_snapshot" type="NUMERIC(12,3)" defaultValueNumeric="0.000">
+                <constraints nullable="false"/>
+            </column>
+            <column name="counted_quantity" type="NUMERIC(12,3)"/>
+            <column name="variance_quantity" type="NUMERIC(12,3)"/>
+            <column name="reconciled_system_quantity" type="NUMERIC(12,3)"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_count_lines"
+                             columnNames="tenant_id, count_id, location_id, variant_id"
+                             constraintName="uq_stock_count_lines_item"/>
+
+        <addForeignKeyConstraint baseTableName="stock_count_lines"
+                                 baseColumnNames="tenant_id, count_id"
+                                 constraintName="fk_stock_count_lines_count"
+                                 referencedTableName="stock_counts"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_count_lines"
+                                 baseColumnNames="tenant_id, warehouse_id, location_id"
+                                 constraintName="fk_stock_count_lines_location"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_count_lines"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_stock_count_lines_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_count_lines
+            ADD CONSTRAINT chk_stock_count_lines_vals
+            CHECK (
+                system_quantity_snapshot &gt;= 0
+                AND (counted_quantity IS NULL OR counted_quantity &gt;= 0)
+                AND (reconciled_system_quantity IS NULL OR reconciled_system_quantity &gt;= 0)
+            );
+        </sql>
+
+        <createTable tableName="stock_adjustments">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_adjustments" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_adjustments_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="adjustment_number" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="reason" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(24)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="stock_count_id" type="UUID"/>
+            <column name="submitted_by" type="UUID"/>
+            <column name="approved_by" type="UUID"/>
+            <column name="approved_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="rejection_reason" type="VARCHAR(255)"/>
+            <column name="ledger_transaction_id" type="UUID"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_adjustments"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_stock_adjustments_tenant_id"/>
+
+        <addUniqueConstraint tableName="stock_adjustments"
+                             columnNames="tenant_id, adjustment_number"
+                             constraintName="uq_stock_adjustments_number"/>
+
+        <addForeignKeyConstraint baseTableName="stock_adjustments"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_stock_adjustments_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_adjustments"
+                                 baseColumnNames="tenant_id, stock_count_id"
+                                 constraintName="fk_stock_adjustments_count"
+                                 referencedTableName="stock_counts"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_adjustments"
+                                 baseColumnNames="tenant_id, ledger_transaction_id"
+                                 constraintName="fk_stock_adjustments_ledger_txn"
+                                 referencedTableName="inventory_transactions"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_counts"
+                                 baseColumnNames="tenant_id, generated_adjustment_id"
+                                 constraintName="fk_stock_counts_adjustment"
+                                 referencedTableName="stock_adjustments"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="stock_adjustments" indexName="idx_stock_adjustments_wh_status">
+            <column name="tenant_id"/>
+            <column name="warehouse_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_adjustments
+            ADD CONSTRAINT chk_stock_adjustments_reason
+            CHECK (reason IN ('CYCLE_COUNT', 'DAMAGE', 'EXPIRY', 'THEFT_SHRINKAGE', 'FOUND_STOCK', 'QUALITY_HOLD', 'CORRECTION', 'OTHER'));
+
+            ALTER TABLE stock_adjustments
+            ADD CONSTRAINT chk_stock_adjustments_status
+            CHECK (status IN ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED'));
+        </sql>
+
+        <createTable tableName="stock_adjustment_lines">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_adjustment_lines" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_adj_lines_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="adjustment_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="line_number" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="adjustment_direction" type="VARCHAR(16)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="movement_type" type="VARCHAR(24)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quantity" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="unit_cost" type="NUMERIC(15,4)"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_adjustment_lines"
+                             columnNames="tenant_id, adjustment_id, line_number"
+                             constraintName="uq_stock_adj_lines_no"/>
+
+        <addForeignKeyConstraint baseTableName="stock_adjustment_lines"
+                                 baseColumnNames="tenant_id, adjustment_id"
+                                 constraintName="fk_stock_adj_lines_adjustment"
+                                 referencedTableName="stock_adjustments"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_adjustment_lines"
+                                 baseColumnNames="tenant_id, warehouse_id, location_id"
+                                 constraintName="fk_stock_adj_lines_location"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_adjustment_lines"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_stock_adj_lines_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_adjustment_lines
+            ADD CONSTRAINT chk_stock_adj_lines_direction_type
+            CHECK (
+                (adjustment_direction = 'INCREASE' AND movement_type = 'ADJUSTMENT_IN')
+                OR (adjustment_direction = 'DECREASE' AND movement_type IN ('ADJUSTMENT_OUT', 'WRITE_OFF'))
+            );
+
+            ALTER TABLE stock_adjustment_lines
+            ADD CONSTRAINT chk_stock_adj_lines_vals
+            CHECK (line_number &gt; 0 AND quantity &gt; 0 AND (unit_cost IS NULL OR unit_cost &gt;= 0));
+        </sql>
+
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="stock_counts" constraintName="fk_stock_counts_adjustment"/>
+            <dropTable tableName="stock_adjustment_lines"/>
+            <dropTable tableName="stock_adjustments"/>
+            <dropTable tableName="stock_count_lines"/>
+            <dropTable tableName="stock_counts"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

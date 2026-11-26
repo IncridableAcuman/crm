@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-23-create-warehouses-and-locations" author="savdocrm-inventory">
+        <comment>Create warehouses and stock_locations tables with tenant isolation, optional composite branch FK, and single-default partial unique indexes</comment>
+
+        <createTable tableName="warehouses">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_warehouses" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_warehouses_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="branch_id" type="UUID"/>
+            <column name="code" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_type" type="VARCHAR(24)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(16)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_default_for_branch" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="allow_negative_stock" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="address" type="VARCHAR(255)"/>
+            <column name="phone" type="VARCHAR(32)"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="warehouses"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_warehouses_tenant_id"/>
+
+        <addUniqueConstraint tableName="warehouses"
+                             columnNames="tenant_id, code"
+                             constraintName="uq_warehouses_tenant_code"/>
+
+        <addForeignKeyConstraint baseTableName="warehouses"
+                                 baseColumnNames="tenant_id, branch_id"
+                                 constraintName="fk_warehouses_branch"
+                                 referencedTableName="branches"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="warehouses" indexName="idx_warehouses_tenant_status">
+            <column name="tenant_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE warehouses
+            ADD CONSTRAINT chk_warehouses_type
+            CHECK (warehouse_type IN ('RETAIL_STORE', 'CENTRAL_HUB', 'TRANSIT_HUB', 'RETURNS_CENTER'));
+
+            ALTER TABLE warehouses
+            ADD CONSTRAINT chk_warehouses_status
+            CHECK (status IN ('ACTIVE', 'INACTIVE', 'ARCHIVED'));
+
+            ALTER TABLE warehouses
+            ADD CONSTRAINT chk_warehouses_default_branch
+            CHECK (NOT is_default_for_branch OR branch_id IS NOT NULL);
+
+            ALTER TABLE warehouses
+            ADD CONSTRAINT chk_warehouses_code_format
+            CHECK (code ~ '^[A-Z0-9_-]{2,32}$');
+
+            ALTER TABLE warehouses
+            ADD CONSTRAINT chk_warehouses_name_not_blank
+            CHECK (BTRIM(name) &lt;&gt; '');
+
+            CREATE UNIQUE INDEX uq_warehouses_branch_default
+            ON warehouses (tenant_id, branch_id)
+            WHERE is_default_for_branch = TRUE AND branch_id IS NOT NULL;
+
+            CREATE INDEX idx_warehouses_tenant_branch
+            ON warehouses (tenant_id, branch_id)
+            WHERE branch_id IS NOT NULL;
+        </sql>
+
+        <createTable tableName="stock_locations">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_locations" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_locations_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="code" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(120)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="location_type" type="VARCHAR(24)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(16)" defaultValue="ACTIVE">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_default" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="zone" type="VARCHAR(32)"/>
+            <column name="aisle" type="VARCHAR(32)"/>
+            <column name="rack" type="VARCHAR(32)"/>
+            <column name="bin" type="VARCHAR(32)"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_locations"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_stock_locations_tenant_id"/>
+
+        <addUniqueConstraint tableName="stock_locations"
+                             columnNames="tenant_id, warehouse_id, id"
+                             constraintName="uq_stock_locations_tenant_wh_id"/>
+
+        <addUniqueConstraint tableName="stock_locations"
+                             columnNames="tenant_id, warehouse_id, code"
+                             constraintName="uq_stock_locations_code"/>
+
+        <addForeignKeyConstraint baseTableName="stock_locations"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_stock_locations_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="stock_locations" indexName="idx_stock_locations_tenant_wh_type">
+            <column name="tenant_id"/>
+            <column name="warehouse_id"/>
+            <column name="location_type"/>
+            <column name="status"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_locations
+            ADD CONSTRAINT chk_stock_locations_type
+            CHECK (location_type IN ('STORAGE', 'PICKING', 'RECEIVING_DOCK', 'DAMAGED', 'QUARANTINE'));
+
+            ALTER TABLE stock_locations
+            ADD CONSTRAINT chk_stock_locations_status
+            CHECK (status IN ('ACTIVE', 'INACTIVE'));
+
+            ALTER TABLE stock_locations
+            ADD CONSTRAINT chk_stock_locations_default_storage
+            CHECK (NOT is_default OR location_type = 'STORAGE');
+
+            ALTER TABLE stock_locations
+            ADD CONSTRAINT chk_stock_locations_code_format
+            CHECK (code ~ '^[A-Z0-9._-]{2,48}$');
+
+            ALTER TABLE stock_locations
+            ADD CONSTRAINT chk_stock_locations_name_not_blank
+            CHECK (BTRIM(name) &lt;&gt; '');
+
+            CREATE UNIQUE INDEX uq_stock_locations_wh_default
+            ON stock_locations (tenant_id, warehouse_id)
+            WHERE is_default = TRUE;
+        </sql>
+
+        <rollback>
+            <dropTable tableName="stock_locations"/>
+            <dropTable tableName="warehouses"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

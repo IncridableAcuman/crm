@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-31-extend-rbac-warehouse-scope" author="savdocrm-security">
+        <comment>Extend user_role_assignments to support explicit WAREHOUSE RBAC scope with composite FK (RESTRICT) and partial unique index</comment>
+
+        <addColumn tableName="user_role_assignments">
+            <column name="warehouse_id" type="UUID"/>
+        </addColumn>
+
+        <addForeignKeyConstraint baseTableName="user_role_assignments"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_assignments_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE user_role_assignments
+            DROP CONSTRAINT chk_assignments_scope_type;
+
+            ALTER TABLE user_role_assignments
+            ADD CONSTRAINT chk_assignments_scope_type
+            CHECK (scope_type IN ('TENANT', 'BRANCH', 'WAREHOUSE'));
+
+            ALTER TABLE user_role_assignments
+            DROP CONSTRAINT chk_assignments_scope_branch;
+
+            ALTER TABLE user_role_assignments
+            ADD CONSTRAINT chk_assignments_scope_branch
+            CHECK (
+                (scope_type = 'TENANT' AND branch_id IS NULL AND warehouse_id IS NULL) OR
+                (scope_type = 'BRANCH' AND branch_id IS NOT NULL AND warehouse_id IS NULL) OR
+                (scope_type = 'WAREHOUSE' AND warehouse_id IS NOT NULL AND branch_id IS NULL)
+            );
+
+            CREATE UNIQUE INDEX uq_assignments_active_warehouse
+            ON user_role_assignments (tenant_id, membership_id, role_id, warehouse_id)
+            WHERE is_active = TRUE AND scope_type = 'WAREHOUSE';
+
+            CREATE INDEX idx_assignments_tenant_wh_active
+            ON user_role_assignments (tenant_id, warehouse_id, is_active)
+            WHERE warehouse_id IS NOT NULL;
+        </sql>
+
+        <rollback>
+            <sql dbms="postgresql">
+                DROP INDEX IF EXISTS idx_assignments_tenant_wh_active;
+                DROP INDEX IF EXISTS uq_assignments_active_warehouse;
+
+                ALTER TABLE user_role_assignments DROP CONSTRAINT chk_assignments_scope_branch;
+                ALTER TABLE user_role_assignments ADD CONSTRAINT chk_assignments_scope_branch
+                CHECK (
+                    (scope_type = 'TENANT' AND branch_id IS NULL) OR
+                    (scope_type = 'BRANCH' AND branch_id IS NOT NULL)
+                );
+
+                ALTER TABLE user_role_assignments DROP CONSTRAINT chk_assignments_scope_type;
+                ALTER TABLE user_role_assignments ADD CONSTRAINT chk_assignments_scope_type
+                CHECK (scope_type IN ('TENANT', 'BRANCH'));
+            </sql>
+            <dropForeignKeyConstraint baseTableName="user_role_assignments" constraintName="fk_assignments_warehouse"/>
+            <dropColumn tableName="user_role_assignments" columnName="warehouse_id"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

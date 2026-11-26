@@ -172,7 +172,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   return (
     <>
       {/* Desktop / Tablet Sidebar */}
-      <aside className="hidden md:block w-64 shrink-0 border-r border-slate-200 bg-slate-50/50 min-h-[calc(100vh-4rem)]">
+      <aside className="hidden md:block w-64 shrink-0 border-r border-slate-200 bg-slate-50/50 min-h-[calc(100vh-4rem)] overflow-y-auto">
         {sidebarContent}
       </aside>
 
@@ -184,7 +184,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             onClick={onClose}
             aria-hidden="true"
           />
-          <aside className="relative z-10 w-64 max-w-[80vw] bg-slate-50 border-r border-slate-200 min-h-screen shadow-xl">
+          <aside className="relative z-10 w-72 max-w-[85vw] overflow-y-auto bg-slate-50 border-r border-slate-200 min-h-screen shadow-xl">
             {sidebarContent}
           </aside>
         </div>

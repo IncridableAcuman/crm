@@ -292,12 +292,12 @@ class RbacDatabaseMigrationIntegrationTest {
     // =========================================================================
 
     @Test
-    @DisplayName("Verify all 33 canonical permissions exist and have valid structure")
-    void shouldVerifyAll33CanonicalPermissionsExist() {
+    @DisplayName("Verify all 53 canonical DB permissions exist and have valid structure")
+    void shouldVerifyAll53CanonicalPermissionsExist() {
         List<Map<String, Object>> permissions = jdbcTemplate.queryForList(
                 "SELECT code, module, resource, action FROM permissions ORDER BY code"
         );
-        assertThat(permissions).hasSize(33);
+        assertThat(permissions).hasSize(53);
 
         for (Map<String, Object> perm : permissions) {
             String code = (String) perm.get("code");
@@ -342,13 +342,13 @@ class RbacDatabaseMigrationIntegrationTest {
                 tenantAId, roleAOwnerId
         );
 
-        // Verify OWNER has all 33 permissions
+        // Verify OWNER has all 53 permissions
         Integer ownerPermCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM role_permissions WHERE role_id = ?",
                 Integer.class,
                 roleAOwnerId
         );
-        assertThat(ownerPermCount).isEqualTo(33);
+        assertThat(ownerPermCount).isEqualTo(53);
 
         // Create a custom role in Tenant A
         UUID customRoleId = UUID.randomUUID();
@@ -463,7 +463,7 @@ class RbacDatabaseMigrationIntegrationTest {
                 Integer.class,
                 legacyOwnerRoleId
         );
-        assertThat(permCount).isEqualTo(33);
+        assertThat(permCount).isEqualTo(53);
 
         // 5. Existing tenant data remains 100% intact
         String branchName = jdbcTemplate.queryForObject("SELECT name FROM branches WHERE id = ?", String.class, legacyBranchId);

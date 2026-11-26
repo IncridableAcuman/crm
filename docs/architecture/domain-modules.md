@@ -115,12 +115,11 @@ graph TD
 ## 3. Module Specifications & Boundaries
 
 ### 3.1. Tenancy Module (`com.savdocrm.modules.tenancy`)
-* **Core Purpose**: Manages SaaS account subscriptions, tenant provisioning, store profiles, branch networks, and physical warehouse mapping.
+* **Core Purpose**: Manages SaaS account subscriptions, tenant provisioning, store profiles, and branch networks (`Warehouse` belongs to `Inventory` per [ADR-0011](06-inventory-decisions.md#adr-0011-place-warehouse-in-inventory-module-with-optional-branch-reference)).
 * **Entities**:
   - `Tenant`: Top-level legal/business entity.
   - `Branch`: Physical store or sales outlet.
-  - `Warehouse`: Storage facility attached to a branch or designated as a central hub.
-  - `TenantSubscription`: SaaS billing tier and limits.
+  - `TenantSubscription`: Planned SaaS billing tier and limits.
 
 ---
 
@@ -151,15 +150,19 @@ graph TD
 
 ---
 
-### 3.4. Inventory Module (`com.savdocrm.modules.inventory`)
-* **Core Purpose**: Tracks real-time stock balances across warehouses using an immutable double-entry style inventory ledger.
+### 3.4. Inventory Module (`com.savdocrm.modules.inventory`) *(M06.1 Designed; Implementation M06.2+)*
+* **Core Purpose**: Owns warehouses, storage locations, immutable physical stock ledger, location/warehouse balance projections, stock documents, reservations, and Weighted Average Cost (`WAC`) valuation ([06-inventory-management.md](06-inventory-management.md)).
 * **Entities**:
-  - `InventoryStock`: Materialized current balance for a `(tenant_id, warehouse_id, variant_id)` tuple. Protected by `@Version` for optimistic concurrency.
-  - `InventoryTransaction`: Immutable record of every physical stock movement (`quantity_delta`, `quantity_after`, `unit_cost`, `type`: `PURCHASE_RECEIPT`, `SALE_DEDUCTION`, `SALE_RETURN`, `TRANSFER_OUT`, `TRANSFER_IN`, `ADJUSTMENT_INCREASE`, `ADJUSTMENT_DECREASE`, `WRITE_OFF`).
-  - `InventoryTransfer`: Document tracking stock dispatched between warehouses.
-* **Public Contracts**:
-  - `StockMovementService`: Invoked synchronously by Sales for stock deduction/return, and by Purchases for stock intake.
-  - `StockLevelQueryFacade`: Exposes available and reserved stock balances.
+  - `Warehouse` & `StockLocation`: Tenant holding facilities (branch-linked or unassigned central hubs) and flat bin/zone locations (`STORAGE`, `PICKING`, `RECEIVING_DOCK`, `DAMAGED`, `QUARANTINE`).
+  - `StockBalance` (`inventory_balances`) & `WarehouseStockSummary` (`inventory_warehouse_stocks`): Authoritative pessimistic-locked location balances and materialized warehouse stock projections (`on_hand`, `sellable`, `reserved`, `available`, `staging`, `damaged`, `quarantined`, `in_transit`).
+  - `InventoryTransaction` & `InventoryTransactionLine`: Strictly append-only header-line physical stock ledger with compensating `REVERSAL` support.
+  - `InventoryCost` (`inventory_costs`): Warehouse-variant Moving Weighted Average Cost (`WAC`, `NUMERIC(15,4)`).
+  - Operational Documents & Reservations: `StockReceipt`, `StockCount`, `StockAdjustment`, `StockTransfer` (two-step dispatch + receipt), and `InventoryReservation`.
+* **Public Contracts (`com.savdocrm.modules.inventory.application.facade`)**:
+  - `WarehouseQueryFacade`: Warehouse lookup and default fulfillment warehouse resolution per branch.
+  - `StockQueryFacade`: O(1) batch warehouse availability & variant stock breakdowns.
+  - `StockMovementFacade`: Transactional stock intake, supplier return, POS/sales issue (with reservation consumption & COGS return), and sales returns.
+  - `StockReservationFacade`: Soft hold creation, release, and TTL expiration coordination.
 
 ---
 

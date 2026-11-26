@@ -62,17 +62,17 @@ export const TenantSelectPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+    <div className="min-h-dvh flex items-center justify-center bg-slate-50 p-4 py-8">
       <Card className="w-full max-w-xl shadow-lg border-slate-200">
         <CardHeader className="space-y-1">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
                 <Store className="h-5 w-5" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <CardTitle className="text-xl font-bold text-slate-900">Select Store</CardTitle>
-                <CardDescription className="text-xs text-slate-500">
+                <CardDescription className="text-xs text-slate-500 break-words">
                   {user ? `Logged in as ${user.firstName} ${user.lastName} (${user.email})` : 'Loading profile...'}
                 </CardDescription>
               </div>
@@ -81,7 +81,7 @@ export const TenantSelectPage: React.FC = () => {
               variant="outline"
               size="sm"
               onClick={handleLogout}
-              className="text-slate-600 hover:text-slate-900"
+              className="shrink-0 self-start text-slate-600 hover:text-slate-900 sm:self-auto"
             >
               <LogOut className="mr-1.5 h-3.5 w-3.5" />
               Sign Out
@@ -132,15 +132,15 @@ export const TenantSelectPage: React.FC = () => {
                           void handleSelectStore(tenant);
                         }
                       }}
-                      className={`flex items-center justify-between p-4 rounded-lg border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 ${
+                      className={`flex flex-col gap-3 rounded-lg border p-4 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 sm:flex-row sm:items-center sm:justify-between ${
                         selectedId === tenant.tenantId
                           ? 'border-slate-900 bg-slate-50 shadow-sm'
                           : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div
-                          className={`flex h-9 w-9 items-center justify-center rounded-md ${
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
                             selectedId === tenant.tenantId
                               ? 'bg-slate-900 text-white'
                               : 'bg-slate-100 text-slate-600'
@@ -148,8 +148,8 @@ export const TenantSelectPage: React.FC = () => {
                         >
                           <Store className="h-4 w-4" />
                         </div>
-                        <div>
-                          <div className="flex items-center gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
                             <h4 className="text-sm font-semibold text-slate-900">{tenant.tenantName}</h4>
                             <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-600">
                               {tenant.tenantCode}
@@ -169,7 +169,9 @@ export const TenantSelectPage: React.FC = () => {
                         size="sm"
                         variant={selectedId === tenant.tenantId ? 'default' : 'outline'}
                         disabled={isLoading}
-                        className={selectedId === tenant.tenantId ? 'bg-slate-900 text-white' : ''}
+                        className={`shrink-0 self-start sm:self-auto ${
+                          selectedId === tenant.tenantId ? 'bg-slate-900 text-white' : ''
+                        }`}
                       >
                         {isLoading ? (
                           <Loader2 className="h-4 w-4 animate-spin" />

@@ -77,7 +77,7 @@ export const ProductFormPage: React.FC<ProductFormPageProps> = ({ mode }) => {
           </Button>
           <div className="flex items-center gap-2">
             <Package className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               {mode === 'create' ? 'New Product' : `Edit ${product?.name ?? 'Product'}`}
             </h1>
           </div>

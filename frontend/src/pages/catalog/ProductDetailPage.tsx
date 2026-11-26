@@ -199,7 +199,7 @@ export const ProductDetailPage: React.FC = () => {
 
           <div className="flex items-center gap-2.5 flex-wrap">
             <Package className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">{product.name}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 break-words">{product.name}</h1>
             <Badge
               variant={
                 product.status === 'ACTIVE'

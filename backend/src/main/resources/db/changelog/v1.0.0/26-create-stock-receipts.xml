@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="v1.0.0-26-create-stock-receipts" author="savdocrm-inventory">
+        <comment>Create stock_receipts and stock_receipt_lines operational receiving tables</comment>
+
+        <createTable tableName="stock_receipts">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_receipts" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_receipts_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="receipt_number" type="VARCHAR(48)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_type" type="VARCHAR(24)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_reference_id" type="UUID"/>
+            <column name="status" type="VARCHAR(16)" defaultValue="DRAFT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="received_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="posted_at" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="posted_by" type="UUID"/>
+            <column name="ledger_transaction_id" type="UUID"/>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_by" type="UUID"/>
+            <column name="updated_by" type="UUID"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_receipts"
+                             columnNames="tenant_id, id"
+                             constraintName="uq_stock_receipts_tenant_id"/>
+
+        <addUniqueConstraint tableName="stock_receipts"
+                             columnNames="tenant_id, receipt_number"
+                             constraintName="uq_stock_receipts_number"/>
+
+        <addForeignKeyConstraint baseTableName="stock_receipts"
+                                 baseColumnNames="tenant_id, warehouse_id"
+                                 constraintName="fk_stock_receipts_warehouse"
+                                 referencedTableName="warehouses"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_receipts"
+                                 baseColumnNames="tenant_id, ledger_transaction_id"
+                                 constraintName="fk_stock_receipts_ledger_txn"
+                                 referencedTableName="inventory_transactions"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <createIndex tableName="stock_receipts" indexName="idx_stock_receipts_wh_status">
+            <column name="tenant_id"/>
+            <column name="warehouse_id"/>
+            <column name="status"/>
+        </createIndex>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_receipts
+            ADD CONSTRAINT chk_stock_receipts_source_type
+            CHECK (source_type IN ('PURCHASE_ORDER', 'MANUAL', 'OPENING_BALANCE', 'RETURN'));
+
+            ALTER TABLE stock_receipts
+            ADD CONSTRAINT chk_stock_receipts_status
+            CHECK (status IN ('DRAFT', 'POSTED', 'CANCELLED'));
+
+            CREATE INDEX idx_stock_receipts_source_ref
+            ON stock_receipts (tenant_id, source_type, source_reference_id)
+            WHERE source_reference_id IS NOT NULL;
+        </sql>
+
+        <createTable tableName="stock_receipt_lines">
+            <column name="id" type="UUID">
+                <constraints primaryKey="true" primaryKeyName="pk_stock_receipt_lines" nullable="false"/>
+            </column>
+            <column name="tenant_id" type="UUID">
+                <constraints nullable="false"
+                             foreignKeyName="fk_stock_receipt_lines_tenant"
+                             references="tenants(id)"
+                             deleteCascade="false"/>
+            </column>
+            <column name="receipt_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="line_number" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="warehouse_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="location_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="variant_id" type="UUID">
+                <constraints nullable="false"/>
+            </column>
+            <column name="quantity" type="NUMERIC(12,3)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="unit_cost" type="NUMERIC(15,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="line_total_cost" type="NUMERIC(18,4)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="notes" type="TEXT"/>
+            <column name="created_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP WITH TIME ZONE" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="stock_receipt_lines"
+                             columnNames="tenant_id, receipt_id, line_number"
+                             constraintName="uq_stock_receipt_lines_no"/>
+
+        <addForeignKeyConstraint baseTableName="stock_receipt_lines"
+                                 baseColumnNames="tenant_id, receipt_id"
+                                 constraintName="fk_stock_receipt_lines_receipt"
+                                 referencedTableName="stock_receipts"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_receipt_lines"
+                                 baseColumnNames="tenant_id, warehouse_id, location_id"
+                                 constraintName="fk_stock_receipt_lines_location"
+                                 referencedTableName="stock_locations"
+                                 referencedColumnNames="tenant_id, warehouse_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <addForeignKeyConstraint baseTableName="stock_receipt_lines"
+                                 baseColumnNames="tenant_id, variant_id"
+                                 constraintName="fk_stock_receipt_lines_variant"
+                                 referencedTableName="product_variants"
+                                 referencedColumnNames="tenant_id, id"
+                                 onDelete="RESTRICT"/>
+
+        <sql dbms="postgresql">
+            ALTER TABLE stock_receipt_lines
+            ADD CONSTRAINT chk_stock_receipt_lines_vals
+            CHECK (line_number &gt; 0 AND quantity &gt; 0 AND unit_cost &gt;= 0 AND line_total_cost &gt;= 0);
+        </sql>
+
+        <rollback>
+            <dropTable tableName="stock_receipt_lines"/>
+            <dropTable tableName="stock_receipts"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

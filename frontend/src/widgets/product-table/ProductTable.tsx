@@ -52,7 +52,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
 }) => {
   return (
     <div className="space-y-4">
-      <Table>
+      <Table className="min-w-[820px]">
         <TableHeader>
           <TableRow>
             <TableHead>Product</TableHead>

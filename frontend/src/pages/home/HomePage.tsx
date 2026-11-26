@@ -104,7 +104,7 @@ export const HomePage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 gap-4">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               Welcome back{user?.firstName ? `, ${user.firstName}` : ''}
             </h1>
             <Badge variant="outline" className="font-mono text-xs">
@@ -390,7 +390,7 @@ export const HomePage: React.FC = () => {
               </div>
             )}
 
-            <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
               <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 <span>Fail-closed security verified</span>

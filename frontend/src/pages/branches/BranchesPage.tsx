@@ -106,7 +106,7 @@ export const BranchesPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <GitBranch className="h-6 w-6 text-slate-900" />
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Store Branches</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Store Branches</h1>
           </div>
           <p className="text-sm text-slate-500 mt-1">
             Manage your retail store branches, locations, and primary branch designation.
@@ -252,7 +252,7 @@ export const BranchesPage: React.FC = () => {
               </p>
             </div>
           ) : (
-            <Table>
+            <Table className="min-w-[720px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Code</TableHead>
