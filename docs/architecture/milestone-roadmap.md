@@ -109,7 +109,7 @@ gantt
 ---
 
 ## Milestone 05: Product Catalog & Category Management
-- **Status**: Backend Domain, Services, REST API & RBAC Completed (M05.1–M05.4 Completed; M05.5–M05.6 Planned)
+- **Status**: Core Implementation Completed (M05.1–M05.5 Completed & Verified); Roadmap Closeout Audit Pending (M05.6 Planned; M06 Not Started)
 - **Sub-Milestones**:
   - **M05.1 — Architecture & Domain Design** *(Completed — Design-Only)*:
     - **Scope**: Bounded context definition, `Product`/`ProductVariant`/`ProductBarcode`/`Category`/`UnitOfMeasure` domain model, database schema, REST API & RBAC contracts, frontend FSD blueprint, and ADRs (`ADR-0008`–`ADR-0010`).
@@ -117,7 +117,7 @@ gantt
     - **Deliverables**: `05-product-catalog.md`, `05-product-database-design.md`, `05-product-api-contracts.md`, `05-product-frontend-architecture.md`, `ADR-0008`–`ADR-0010`, updated `domain-modules.md` & `milestone-roadmap.md`.
     - **Exclusions**: Zero Java, TypeScript, Liquibase, or seed implementation.
   - **M05.2 — Database Schema & Liquibase** *(Completed — Schema & Migration Tests Only)*:
-    - **Scope**: Append-only Liquibase migrations (`v1.0.0/16`–`v1.0.0/21`) for `product_categories`, `units_of_measure`, idempotent default 8-unit tenant seeding, `products`, `product_variants`, and `product_barcodes` (`ON DELETE RESTRICT` across all business FKs).
+    - **Scope**: Append-only Liquibase migrations (`v1.0.0/16`–`v1.0.0/22`) for `product_categories`, `units_of_measure`, idempotent default 8-unit tenant seeding, `products`, `product_variants`, and `product_barcodes` (`ON DELETE RESTRICT` across all tenant and business FKs).
     - **Dependencies**: M05.1.
     - **Tests & Acceptance Criteria**: Testcontainers PostgreSQL 16 integration tests (`CatalogDatabaseMigrationIntegrationTest`, `PostgresLiquibaseMigrationIntegrationTest`) proving composite FKs, cross-tenant rejection, SKU/barcode/sibling uniqueness, partial default-variant & primary-barcode indexes, `CHECK` constraints, `RESTRICT` delete guards, and idempotent UOM seeding.
     - **Exclusions**: Java production code (`TenantBootstrapService` new-tenant UOM hook, entities, services, controllers) and frontend UI.
@@ -131,14 +131,15 @@ gantt
     - **Dependencies**: M05.3.
     - **Tests & Acceptance Criteria**: MockMvc PostgreSQL 16 Testcontainers integration tests (`CatalogWebApiIntegrationTest`, `CatalogRbacSecurityIntegrationTest`, `PermissionAuthorizationServiceTest`) covering database pagination/filtering/allowlisted sorting, single-query category tree, lifecycle & aggregate ownership invariants, `400`/`401`/`403`/`404`/`409` RFC7807 errors, `TENANT`/`BRANCH`/wrong-branch/suspended/cross-tenant RBAC checks, and ArchUnit checks.
     - **Exclusions**: Frontend UI, Inventory stock, Sales/Purchases.
-  - **M05.5 — Product & Category Frontend (FSD)** *(Planned)*:
-    - **Scope**: `entities/{product,category,unit}`, `features/catalog/*`, `widgets/{product-table,category-tree}`, `pages/catalog/*`, `PermissionRoute` + `PermissionGuard` integration, and Vitest + production build verification.
+  - **M05.5 — Product & Category Frontend (FSD)** *(Completed & Verified — Commit `e95d3d6`)*:
+    - **Scope**: `entities/{product,category,unit}`, `useCatalogReadBranchScope` (`entities/permission`), `features/catalog/{product-form,variant-editor,category-form,unit-manager}`, `widgets/{product-table,category-tree,app-sidebar}`, `pages/catalog/{ProductsListPage,ProductDetailPage,ProductFormPage,CategoriesPage}`, `HomePage` catalog summary card, `/catalog/products`, `/catalog/products/new`, `/catalog/products/:id`, `/catalog/products/:id/edit`, and `/catalog/categories` routes with `PermissionRoute` + `PermissionGuard` integration.
     - **Dependencies**: M05.4.
+    - **Verification & Known Limitations**: Verified via Vitest (`19` test files, `74/74` tests passing including `18` new catalog tests against mocked API clients) and `tsc && vite build` (`PASS`, with non-fatal chunk-size warning); repository ESLint config is absent; live full-stack E2E verification remains for M05.6.
     - **Exclusions**: POS checkout, stock balances, image uploads.
-  - **M05.6 — Integration, Security & Quality Audit** *(Planned)*:
-    - **Scope**: End-to-end backend/frontend contract audit, multi-tenant cache isolation verification, ArchUnit & full regression test pass.
+  - **M05.6 — Integration, Security & Quality Audit** *(Planned — Next Milestone)*:
+    - **Scope**: End-to-end live backend/frontend contract audit, full-stack multi-tenant & branch-scope cache isolation verification, and combined post-M05.5 ArchUnit & backend/frontend regression sign-off to close Milestone 05 prior to M06 Inventory.
     - **Dependencies**: M05.5.
-    - **Exclusions**: M06 Inventory implementation.
+    - **Exclusions**: M06 Inventory implementation (not yet started).
 
 ---
 

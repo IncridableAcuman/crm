@@ -137,7 +137,7 @@ graph TD
 
 ### 3.3. Catalog Module (`com.savdocrm.modules.catalog`)
 * **Core Purpose**: Owns product identity, SKU/barcode identification, hierarchical categories, measurement unit definitions, and variant option structures across retail verticals. Explicitly does **not** own stock quantities, inventory valuation (WAC), tax regimes, sales orders, or financial transactions.
-* **Implementation Status**: M05.1 Architecture, M05.2 Liquibase Schema, and M05.3 Domain Model, Repositories, Application Services & `ProductQueryFacade` Implemented; M05.4 REST Controllers & RBAC Endpoints Pending.
+* **Implementation Status**: M05.1–M05.5 Completed & Verified (Architecture, Liquibase Schema, Domain Model, Repositories, Application Services, `ProductQueryFacade`, REST API/RBAC & React FSD Frontend); M05.6 Integration, Security & Quality Audit Planned.
 * **Entities & Tables**:
   - `ProductCategory` (`product_categories`): Self-referential Adjacency List (`parent_id`, bounded depth `0..4`, `ON DELETE RESTRICT`), with bounded cycle/depth enforcement in `ProductCategoryService`.
   - `UnitOfMeasure` (`units_of_measure`): Tenant-owned system-seeded (`PCS`, `KG`, `G`, `L`, `ML`, `M`, `BOX`, `PACK`) and custom units with `allow_decimal` and `decimal_precision` (`0..3`), seeded automatically on new tenant registration via `UnitOfMeasureService`.
@@ -147,7 +147,7 @@ graph TD
 * **Application Services & Public Contracts**:
   - `ProductCategoryService`, `UnitOfMeasureService`, `ProductService`, `ProductVariantService`, `ProductBarcodeService`.
   - `ProductQueryFacade` (`ProductQueryFacadeImpl`): Provides immutable DTO projections (`VariantCatalogDto`) to `Inventory`, `Sales`, and `Purchases` without exposing JPA entities or repositories.
-* **Architecture Docs**: [05-product-catalog.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-catalog.md), [05-product-database-design.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-database-design.md), [05-product-api-contracts.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-api-contracts.md)
+* **Architecture Docs**: [05-product-catalog.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-catalog.md), [05-product-database-design.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-database-design.md), [05-product-api-contracts.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-api-contracts.md), [05-product-frontend-architecture.md](file:///home/izzatbek/Desktop/crm/docs/architecture/05-product-frontend-architecture.md)
 
 ---
 

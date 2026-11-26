@@ -206,4 +206,4 @@
 - **Known Limitations**:
   - `DELETE /api/v1/products/{productId}` supports only `DRAFT` deletion per `ProductService.deleteDraftProduct`; `ACTIVE` products must be archived via `POST /archive` or `PATCH /status`.
   - No downstream Inventory/Sales/Purchases reference checks exist yet until M06–M08.
-  - Frontend UI (`M05.5`) is not yet implemented.
+  - Frontend UI (`M05.5`) is implemented (`e95d3d6`), while end-to-end live backend/frontend contract verification (`M05.6`) remains planned.
